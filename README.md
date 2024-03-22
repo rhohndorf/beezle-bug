@@ -33,7 +33,7 @@ Core memory is a nested dictionary and retrieval memory is an associative memory
 ### Environment Interaction via Tool Use/Discovery/Generation
 Tools are the interface by which Beezle Bug interacts with its environment and controls its internal mechanisms.
 
-In the llama-cpp-agent framework a tool is a function or a pydantic objects that can be selected and executed by an agent.
+In the llama-cpp-agent framework a tool is a function or a pydantic object that can be selected and executed by an agent.
 
 The first version of Beezle Bug will have a predefined set of tools for
 * user interaction (send messages, read messages from input buffer/chat room)
@@ -42,7 +42,7 @@ The first version of Beezle Bug will have a predefined set of tools for
 * web search and website scraping
 
 At some point tools will be added for 
-* task management (decomposing tasks into subtasks, )
+* task management (discovery,decomposition, aggregation,...)
 * agent interaction
 
 Later on tools for automatic tool discovery and generation will be added.
