@@ -8,7 +8,7 @@ Beezle Bug has two different forms of appearance. In the virtual world it appear
 * [Current State](#current_state)
 * [Resources](#resources)
 
-## Project Vision and Goals
+## Vision and Goals
 Like its fictional counterpart our Beezle Bug agent starts as a limited toy project and will hopefully grow into a useful tool over time.
 
 With Beezle Bug we want to explore agentive behaviours like
