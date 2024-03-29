@@ -26,14 +26,10 @@ This means it will e.g.
 * Yield execution if there's nothing to do
 * Start additional instances of itself
 
-### Memory
-The llama-cpp-agent framework offers two different kinds of memory, core memory and retrieval memory and tools to manage these.
-Core memory is a nested dictionary and retrieval memory is an associative memory backed by a vector db.
-
 ### Environment Interaction via Tool Use/Discovery/Generation
 Tools are the interface by which Beezle Bug interacts with its environment and controls its internal mechanisms.
 
-In the llama-cpp-agent framework a tool is a function or a pydantic object that can be selected and executed by an agent.
+A tool is a function or a pydantic object that can be selected and executed by an agent.
 
 The first version of Beezle Bug will have a predefined set of tools for
 * user interaction (send messages, read messages from input buffer/chat room)
