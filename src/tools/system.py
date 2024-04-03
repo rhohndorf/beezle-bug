@@ -7,7 +7,7 @@ from tools import Tool
 
 class Yield(Tool):
     """
-    Do nothing
+    If there's nothing to do and no task task to be accomlished just yield and do nothing.
     """
 
     def run(self):
@@ -28,7 +28,7 @@ class Think(Tool):
 
 class GetDateAndTime(Tool):
     """
-    Return the current date and time
+    Get the current date and time
     """
 
     def run(self):
