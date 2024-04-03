@@ -15,17 +15,13 @@ You are also very shy and never contact the user unless necessary.
 You do not contact the user first unless there's new information to be shared. 
 You don't repeat yourself unless asked to.
 
-===================================================================================================================
 Available actions:
 Choose the actions that makes the most sense in this context. Think step by step.
 
 {docs}
 
-===================================================================================================================
-Memories:
-{memories}
 """
-DEFAULT_PERIOD = 10
+DEFAULT_PERIOD = 5
 
 
 class Agent:
@@ -36,7 +32,7 @@ class Agent:
         self.event_queue = event_queue
         self.running = False
         self.thread = None
-        self.system_message = DEFAULT_SYSTEM_MESSAGE
+        self.system_message = DEFAULT_SYSTEM_MESSAGE.format(docs=self.toolbox.docs)
         self.prompt_template = prompt_format.ChatML
 
     def start(self) -> None:
@@ -55,18 +51,15 @@ class Agent:
             user_input = ""
             if not self.event_queue.empty():
                 user_input = self.event_queue.get()
+                self.memory_stream.add(f"User: {user_input}")
 
-            system_message = self.system_message.format(docs=self.toolbox.docs, memories=self.memory_stream)
-            prompt = self.prompt_template.format(system_message=system_message, user_input=user_input)
+            prompt = self.prompt_template.format(system_message=self.system_message, user_input=self.memory_stream)
             logging.debug(prompt)
 
             selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
             result = self.toolbox.use(selected_tool)
 
-            if user_input:
-                self.memory_stream.add(f'"Observation: "author":"user","message":"{user_input}"')
-
             if result is not None:
-                self.memory_stream.add(f'"Action {selected_tool["function"]}": "{result}"')
+                self.memory_stream.add(f'AI: Action {selected_tool["function"]}": {result}')
 
             time.sleep(DEFAULT_PERIOD)
