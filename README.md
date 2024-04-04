@@ -5,9 +5,7 @@ Beezle Bug has two different forms of appearance. In the virtual world it appear
 
 
 * [Vision and Goals](#vision)
-* [Current State](#current_state)
 * [Installation](#installation)
-* [Resources](#resources)
 
 ## Vision and Goals
 Like its fictional counterpart our Beezle Bug agent starts as a limited toy project and will hopefully grow into a useful tool over time.
@@ -34,20 +32,22 @@ What's working ?
 To be able to work on several things at the same time without confusing itself, Beezle Bug can clone itself and give its clone specific instructions. For example 
 
 What's working ?
-* create/start/stop/destroy a clone of itself [ ]
-* delegate tasks to clone [ ]
-* specialize the clone for specific tasks [ ]
+- [ ] Create/start/stop/destroy a clone of itself
+- [ ] Delegate tasks to clone
+- [ ] Specialize the clone for specific tasks
 
 
 ### Self Improvement
 
 What's working ?
 
-### Task Decomposition and Delegation
-The main agent may decide to break an identified task down into a number of subtasks and either work on them sequentially or start a number of (specialized) agents.
+- [ ] Create new primitive tools
+- [ ] Create new compound tools
+- [ ] Fine tune self on collected data
+
 
 ## Installation
 
+### Docker
 
-## Resources
-
+### From Source
