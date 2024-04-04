@@ -25,10 +25,10 @@ to kickstart its internal processes but it's continously running
 
 
 What's working ?
-* Run continuously every n seconds [x]
-* Decide what to do next by choosing from a number of actions on every turn [x]
-* Persist, manage and process memories [ ]
-* Planning [ ]
+- [x] Run continuously every n seconds
+- [x] Decide what to do next by choosing from a number of actions on every turn
+- [ ] Persist, manage and process memories 
+- [ ] Planning
 
 ### Cooperation
 To be able to work on several things at the same time without confusing itself, Beezle Bug can clone itself and give its clone specific instructions. For example 
