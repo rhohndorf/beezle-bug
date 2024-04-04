@@ -7,7 +7,8 @@ from tools import Tool
 
 class Yield(Tool):
     """
-    If there's nothing to do and no task task to be accomlished just yield and do nothing.
+    Just do nothing.
+    This is the best tool to choose in most cases, when there is no active task to be completed.
     """
 
     def run(self):
