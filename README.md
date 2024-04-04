@@ -6,55 +6,48 @@ Beezle Bug has two different forms of appearance. In the virtual world it appear
 
 * [Vision and Goals](#vision)
 * [Current State](#current_state)
+* [Installation](#installation)
 * [Resources](#resources)
 
 ## Vision and Goals
 Like its fictional counterpart our Beezle Bug agent starts as a limited toy project and will hopefully grow into a useful tool over time.
+Beezle is running completely local.
 
 With Beezle Bug we want to explore agentive behaviours like
 * Autonomy
 * Cooperation
 * Self Improvement
 
-### Autonomy, Proactivity and Continuity
-Beezle Bug will be an autonomous, continuosly running and proactive agent. 
+### Autonomy
+Beezle Bug is an autonomous and proactive agent. First and foremost that means it's not waiting for user input 
+to kickstart its internal processes but it's continously running 
 
-This means it will e.g.
-* Run permanently and decide what to do next
-* Manage its memory
-* Execute long running tasks in the background
-* Yield execution if there's nothing to do
-* Start additional instances of itself
 
-### Environment Interaction via Tool Use/Discovery/Generation
-Tools are the interface by which Beezle Bug interacts with its environment and controls its internal mechanisms.
 
-A tool is a function or a pydantic object that can be selected and executed by an agent.
+What's working ?
+* Run continuously every n seconds [x]
+* Decide what to do next by choosing from a number of actions on every turn [x]
+* Persist, manage and process memories [ ]
+* Planning [ ]
 
-The first version of Beezle Bug will have a predefined set of tools for
-* user interaction (send messages, read messages from input buffer/chat room)
-* filesystem interaction (read/write files, list directories)
-* memory interaction (provided by llama-cpp-agent)
-* web search and website scraping
+### Cooperation
+To be able to work on several things at the same time without confusing itself, Beezle Bug can clone itself and give its clone specific instructions. For example 
 
-At some point tools will be added for 
-* task management (discovery,decomposition, aggregation,...)
-* agent interaction
+What's working ?
+* create/start/stop/destroy a clone of itself [ ]
+* delegate tasks to clone [ ]
+* specialize the clone for specific tasks [ ]
 
-Later on tools for automatic tool discovery and generation will be added.
-* tool for writing new tools
-* tools for combining existing tools into a new tool
 
-### User interaction
-In the beginning the only way to interact with the agent will be via a text interface.
-Later we will add speech-to-text input and text-to-speech output.
-In any case user input is stored in an input buffer queue that can be accessed by the agent via a tool and if the agent wants to output a message to the user it executes a "send message" tool.
+### Self Improvement
+
+What's working ?
 
 ### Task Decomposition and Delegation
 The main agent may decide to break an identified task down into a number of subtasks and either work on them sequentially or start a number of (specialized) agents.
 
-## Current State
-No code is available as of yet.
+## Installation
+
 
 ## Resources
 
