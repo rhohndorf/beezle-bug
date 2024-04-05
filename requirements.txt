@@ -1,1 +1,3 @@
 pydantic-gbnf-grammar-generator==0.1.1
+requests==2.31.0
+bs4==4.12.3
