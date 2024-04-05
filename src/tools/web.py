@@ -23,8 +23,9 @@ class ScrapeWebsite(Tool):
             text = soup.get_text(separator=" ", strip=True)
             return text
         else:
-            logging.error("Failed to retrieve page:", response.status_code)
-            return f"Failed to retrieve page: {response.status_code}"
+            error_msg = f"Failed to retrieve page {self.url}: {response.status_code}"
+            logging.error(error_msg)
+            return error_msg
 
 
 class SearchWeb(Tool):
