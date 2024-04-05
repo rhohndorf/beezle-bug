@@ -46,9 +46,10 @@ class SearchWeb(Tool):
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
             search_results = soup.find_all("a", class_="result__a")
-            results_string = ""
+            results_string = f'{{"search query": "{self.query}", "results": ['
             for i, result in enumerate(search_results):
-                results_string += f"{I}. {result.get_text()} - {result['href']}\n"
+                results_string += f' {{"link text": "{result.get_text()}" , "url": "{result['href']}"}},\n'
+            results_string += "]}"
 
             return results_string.strip()
 
