@@ -47,8 +47,8 @@ class SearchWeb(Tool):
             soup = BeautifulSoup(response.text, "html.parser")
             search_results = soup.find_all("a", class_="result__a")
             results_string = ""
-            for result in search_results:
-                results_string += f"{result.get_text()} - {result['href']}\n"
+            for i, result in enumerate(search_results):
+                results_string += f"{I}. {result.get_text()} - {result['href']}\n"
 
             return results_string.strip()
 
