@@ -6,7 +6,7 @@ import time
 
 from llm_adapter import BaseAdapter
 from memory import MemoryStream
-import prompt_format
+import prompt_template
 from tools import ToolBox
 
 DEFAULT_SYSTEM_MESSAGE = """
@@ -36,7 +36,7 @@ class Agent:
         self.running = False
         self.thread = None
         self.system_message = DEFAULT_SYSTEM_MESSAGE.format(docs=self.toolbox.docs)
-        self.prompt_template = prompt_format.ChatML
+        self.prompt_template = prompt_template.load(prompt_template.CHATML)
 
     def start(self) -> None:
         if not self.running:
@@ -53,9 +53,9 @@ class Agent:
         while self.running:
             if not self.event_queue.empty():
                 user_input = self.event_queue.get()
-                self.memory_stream.add(f"User: {user_input}")
+                self.memory_stream.add({"role": "user", "content": user_input})
 
-            prompt = self.prompt_template.format(system_message=self.system_message, user_input=self.memory_stream)
+            prompt = self.prompt_template.render(system=self.system_message, messages=self.memory_stream.memories[-10:])
             logging.debug(prompt)
 
             selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
@@ -63,6 +63,8 @@ class Agent:
             result = self.toolbox.use(selected_tool)
 
             if result is not None:
-                self.memory_stream.add(f'AI: Action {selected_tool["function"]}": {result}')
+                self.memory_stream.add(
+                    {"role": "assistant", "content": f'Action {selected_tool["function"]}: {result}'}
+                )
 
             time.sleep(DEFAULT_PERIOD)

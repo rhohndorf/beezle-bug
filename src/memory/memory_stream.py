@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import Dict
 
 # from memory.memories import Observation
 
@@ -32,14 +32,8 @@ class MemoryStream:
     #     print(questions)
     #     self.last_reflection_point = len(self.memories) - 1
 
-    def add(self, statement: str) -> None:
+    def add(self, statement: Dict[str, str]) -> None:
         self.memories.append(statement)
-
-    def __str__(self) -> str:
-        memory_strings = ""
-        for mem in self.memories[-100:]:
-            memory_strings += mem + "\n"
-        return memory_strings
 
     #     importance = self._assignImportanceValue(statement)
     #     embedding = llm.embed(statement)
