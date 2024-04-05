@@ -1,6 +1,6 @@
 from jinja2 import Environment, FileSystemLoader, Template
 
-TEMPLATES_FOLDER = "/home/ruben/Code/beezle-bug/src/prompt_templates"
+TEMPLATES_FOLDER = "src/prompt_templates"
 
 CHATML = "chatml"
 
