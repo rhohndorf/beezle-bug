@@ -8,6 +8,8 @@ from tools import ToolBox
 from tools.math import Calculator
 from tools.messaging.local import SendMessageToUser
 from tools.system import Yield, GetDateAndTime, Think
+from tools.web import ScrapeWebsite, SearchWeb
+from tools.tasks import MakePlan
 
 
 def configure_logging(debug):
@@ -23,7 +25,18 @@ def main():
     configure_logging(args.debug)
 
     event_queue = Queue()
-    toolbox = ToolBox([SendMessageToUser, Yield, Think, Calculator, GetDateAndTime])
+    toolbox = ToolBox(
+        [
+            SendMessageToUser,
+            Yield,
+            Think,
+            Calculator,
+            GetDateAndTime,
+            ScrapeWebsite,
+            SearchWeb,
+            MakePlan,
+        ]
+    )
     adapter = LlamaCppApiAdapter()
     agent = Agent(adapter, toolbox, event_queue)
     agent.start()
