@@ -22,7 +22,7 @@ class Calculator(Tool):
     operation: MathOperation = Field(..., description="Math operation to perform.")
     number_two: Union[int, float] = Field(..., description="Second number.")
 
-    def run(self):
+    def run(self, agent):
         if self.operation == MathOperation.ADD:
             return self.number_one + self.number_two
         elif self.operation == MathOperation.SUBTRACT:
