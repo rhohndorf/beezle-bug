@@ -60,11 +60,10 @@ class Agent:
 
             selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
             logging.debug(selected_tool)
-            result = self.toolbox.use(selected_tool)
+            tool = self.toolbox.get_tool(selected_tool)
+            result = tool.run(self)
 
             if result is not None:
-                self.memory_stream.add(
-                    {"role": "assistant", "content": f'Action {selected_tool["function"]}: {result}'}
-                )
+                self.memory_stream.add({"role": "assistant", "content": f"{selected_tool['function']}: {result}"})
 
             time.sleep(DEFAULT_PERIOD)

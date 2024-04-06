@@ -10,6 +10,6 @@ class SendMessageToUser(Tool):
 
     message: str = Field(..., description="Message you want to send to the user.")
 
-    def run(self):
+    def run(self, agent):
         print("Assistant> " + self.message)
         return self.message

@@ -16,15 +16,16 @@ class ScrapeWebsite(Tool):
         description="The URL of the website to scrape.",
     )
 
-    def run(self):
+    def run(self, agent):
         response = requests.get(self.url)
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
             text = soup.get_text(separator=" ", strip=True)
             return text
         else:
-            logging.error("Failed to retrieve page:", response.status_code)
-            return f"Failed to retrieve page: {response.status_code}"
+            error_msg = f"Failed to retrieve page {self.url}: {response.status_code}"
+            logging.error(error_msg)
+            return error_msg
 
 
 class SearchWeb(Tool):
@@ -36,7 +37,7 @@ class SearchWeb(Tool):
         description="the query string to search for",
     )
 
-    def run(self):
+    def run(self, agent):
         url = f"https://duckduckgo.com/html/?q={self.query}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"

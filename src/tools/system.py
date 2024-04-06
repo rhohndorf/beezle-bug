@@ -11,7 +11,7 @@ class Yield(Tool):
     This is the best tool to choose in most cases, when there is no active task to be completed.
     """
 
-    def run(self):
+    def run(self, agent):
         return
 
 
@@ -23,7 +23,7 @@ class Think(Tool):
 
     thought: str = Field(..., description="Your thought")
 
-    def run(self):
+    def run(self, agent):
         return self.thought
 
 
@@ -32,6 +32,6 @@ class GetDateAndTime(Tool):
     Get the current date and time
     """
 
-    def run(self):
+    def run(self, agent):
         current_datetime = datetime.now().strftime("%A, %d %B %Y, %H:%M")
         return current_datetime

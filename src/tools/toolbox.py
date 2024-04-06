@@ -19,7 +19,7 @@ class ToolBox:
             fields_prefix="Parameters",
         )
 
-    def use(self, tool: Dict):
-        tool_name = tool["function"]
-        tool_pars = tool["function_parameters"]
-        return self.tools[tool_name](**tool_pars).run()
+    def get_tool(self, function_call: Dict) -> Tool:
+        func_name = function_call["function"]
+        func_pars = function_call["function_parameters"]
+        return self.tools[func_name](**func_pars)
