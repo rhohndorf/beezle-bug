@@ -32,7 +32,7 @@ class Tool(ABC, BaseModel):
     """
 
     @abstractmethod
-    def run(self) -> Optional[Any]:
+    def run(self, agent) -> Optional[Any]:
         """
         Abstract method to be implemented by subclasses.
 

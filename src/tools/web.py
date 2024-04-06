@@ -16,7 +16,7 @@ class ScrapeWebsite(Tool):
         description="The URL of the website to scrape.",
     )
 
-    def run(self):
+    def run(self, agent):
         response = requests.get(self.url)
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
@@ -37,7 +37,7 @@ class SearchWeb(Tool):
         description="the query string to search for",
     )
 
-    def run(self):
+    def run(self, agent):
         url = f"https://duckduckgo.com/html/?q={self.query}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"

@@ -38,7 +38,7 @@ class WriteTextFile(Tool):
 
     file_content: str = Field(..., description="Triple quoted string for unconstrained output.")
 
-    def run(self):
+    def run(self, agent):
 
         if self.directory == "":
             self.directory = "./"
@@ -90,7 +90,7 @@ class ReadTextFile(Tool):
         ..., description="The name of the file to be read, including its extension (e.g., 'document.txt')."
     )
 
-    def run(self):
+    def run(self, agent):
         try:
             if self.directory.endswith(f"{self.file_name}"):
                 self.directory = self.directory.replace(f"{self.file_name}", "")
@@ -114,7 +114,7 @@ class GetFileList(Tool):
         description="Path to the directory where files will be listed. This path can include subdirectories to be scanned."
     )
 
-    def run(self):
+    def run(self, agent):
         filenames = "File List:\n"
         counter = 1
         base_path = Path(base_folder) / self.directory
