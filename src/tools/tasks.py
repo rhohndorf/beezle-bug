@@ -13,7 +13,7 @@ class MakePlan(Tool):
     goal: str = Field(..., description="The original task that needs to be decomposed into subtasks.")
     plan: List[str] = Field(..., description="The list of step to achieve the goal")
 
-    def run(self):
+    def run(self, agent):
         return self.model_dump_json()
 
 
