@@ -10,7 +10,7 @@ from tools.messaging.local import SendMessageToUser
 from tools.system import Yield, GetDateAndTime, SelfReflect, SelfCritique
 from tools.web import ScrapeWebsite, SearchWeb
 from tools.tasks import MakePlan
-from tools.memory import Recall
+from tools.memory import Recall, AddWorkingMemory, UpdateWorkingMemory, DeleteWorkingMemory
 
 
 def configure_logging(debug):
@@ -37,7 +37,10 @@ def main():
             # ScrapeWebsite,
             # SearchWeb,
             MakePlan,
-            Recall,
+            # Recall,
+            AddWorkingMemory,
+            UpdateWorkingMemory,
+            DeleteWorkingMemory,
         ]
     )
     adapter = LlamaCppApiAdapter()
