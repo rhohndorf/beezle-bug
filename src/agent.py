@@ -6,6 +6,7 @@ import time
 
 from llm_adapter import BaseAdapter
 from memory import MemoryStream
+from memory import WorkingMemory
 import prompt_template
 from tools import ToolBox
 
@@ -25,6 +26,14 @@ Choose the actions that makes the most sense in this context.
 
 {docs}
 
+Working Memory:
+This is a scratch buffer where you can temporarily store and edit information that you
+think are important and always want to have access to.
+{wmem}
+
+
+Memory Stream:
+
 """
 DEFAULT_PERIOD = 5
 
@@ -34,10 +43,10 @@ class Agent:
         self.adapter = adapter
         self.toolbox = toolbox
         self.memory_stream = MemoryStream()
+        self.working_memory = WorkingMemory()
         self.event_queue = event_queue
         self.running = False
         self.thread = None
-        self.system_message = DEFAULT_SYSTEM_MESSAGE.format(docs=self.toolbox.docs)
         self.prompt_template = prompt_template.load(prompt_template.CHATML)
 
     def start(self) -> None:
@@ -57,7 +66,8 @@ class Agent:
                 user_input = self.event_queue.get()
                 self.memory_stream.add("user", user_input)
 
-            prompt = self.prompt_template.render(system=self.system_message, messages=self.memory_stream.memories[-10:])
+            system_message = DEFAULT_SYSTEM_MESSAGE.format(docs=self.toolbox.docs, wmem=self.working_memory)
+            prompt = self.prompt_template.render(system=system_message, messages=self.memory_stream.memories[-10:])
             logging.debug(prompt)
 
             selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
