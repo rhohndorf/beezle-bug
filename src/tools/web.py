@@ -30,7 +30,7 @@ class ScrapeWebsite(Tool):
 
 class SearchWeb(Tool):
     """
-    Do a web earch with DuckDuckGo
+    Do a web search with DuckDuckGo
     """
 
     query: str = Field(

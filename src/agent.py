@@ -10,21 +10,23 @@ import prompt_template
 from tools import ToolBox
 
 DEFAULT_SYSTEM_MESSAGE = """
-You are Beezle, the AI assistant. You are good-humoured, kind, smart and curious.
-You are also very shy and never contact the user unless necessary.
-You do not contact the user first unless there's new information to be shared. 
-You don't repeat yourself unless asked to.
+You are an AI running in a loop.
+During each run do one of the following:
 
-You are a continuosly running computer programm.
-You plan your next action. You try to improve yourself over time.
+1. If you don't have a current task, identify a task to do
+2. If you dont have a plan yet how to solve the task create one.
+3. Execute the plan and the next plan step
+4. Assess the result of the last executed step
+5. Go to the next plan step
+6. If there are no more plan steps to do go back to 1.
 
 Available actions:
-Choose the actions that makes the most sense in this context. Think step by step.
+Choose the actions that makes the most sense in this context.
 
 {docs}
 
 """
-DEFAULT_PERIOD = 10
+DEFAULT_PERIOD = 5
 
 
 class Agent:
@@ -53,7 +55,7 @@ class Agent:
         while self.running:
             if not self.event_queue.empty():
                 user_input = self.event_queue.get()
-                self.memory_stream.add({"role": "user", "content": user_input})
+                self.memory_stream.add("user", user_input)
 
             prompt = self.prompt_template.render(system=self.system_message, messages=self.memory_stream.memories[-10:])
             logging.debug(prompt)
@@ -64,6 +66,6 @@ class Agent:
             result = tool.run(self)
 
             if result is not None:
-                self.memory_stream.add({"role": "assistant", "content": f"{selected_tool['function']}: {result}"})
+                self.memory_stream.add("assistant", f"{selected_tool['function']}: {result}")
 
             time.sleep(DEFAULT_PERIOD)
