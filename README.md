@@ -5,7 +5,7 @@ Beezle Bug has two different forms of appearance. In the virtual world it appear
 
 
 * [Vision and Goals](#vision)
-* [Installation](#installation)
+
 
 ## Vision and Goals
 Like its fictional counterpart our Beezle Bug agent starts as a limited toy project and will hopefully grow into a useful tool over time.
@@ -20,16 +20,14 @@ With Beezle Bug we want to explore agentive behaviours like
 Beezle Bug is an autonomous and proactive agent. First and foremost that means it's not waiting for user input 
 to kickstart its internal processes but it's continously running 
 
-
-
 What's working ?
 - [x] Run continuously every n seconds
 - [x] Decide what to do next by choosing from a number of actions on every turn
-- [ ] Persist, manage and process memories 
+- [x] Manage memories 
 - [ ] Planning
 
 ### Cooperation
-To be able to work on several things at the same time without confusing itself, Beezle Bug can clone itself and give its clone specific instructions. For example 
+To be able to work on several things at the same time without confusing itself, Beezle Bug can clone itself and give its clone specific instructions.
 
 What's working ?
 - [ ] Create/start/stop/destroy a clone of itself
@@ -41,13 +39,6 @@ What's working ?
 
 What's working ?
 
-- [ ] Create new primitive tools
 - [ ] Create new compound tools
+- [ ] Create new primitive tools
 - [ ] Fine tune self on collected data
-
-
-## Installation
-
-### Docker
-
-### From Source
