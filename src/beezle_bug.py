@@ -7,9 +7,10 @@ from llm_adapter.llama_cpp_adapter import LlamaCppApiAdapter
 from tools import ToolBox
 from tools.math import Calculator
 from tools.messaging.local import SendMessageToUser
-from tools.system import Yield, GetDateAndTime, Think
+from tools.system import Yield, GetDateAndTime, SelfReflect, SelfCritique
 from tools.web import ScrapeWebsite, SearchWeb
 from tools.tasks import MakePlan
+from tools.memory import Recall
 
 
 def configure_logging(debug):
@@ -29,12 +30,14 @@ def main():
         [
             SendMessageToUser,
             Yield,
-            Think,
+            SelfReflect,
+            SelfCritique,
             Calculator,
             GetDateAndTime,
-            ScrapeWebsite,
-            SearchWeb,
+            # ScrapeWebsite,
+            # SearchWeb,
             MakePlan,
+            Recall,
         ]
     )
     adapter = LlamaCppApiAdapter()
