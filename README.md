@@ -9,7 +9,7 @@ Beezle Bug has two different forms of appearance. In the virtual world it appear
 
 ## Vision and Goals
 Like its fictional counterpart our Beezle Bug agent starts as a limited toy project and will hopefully grow into a useful tool over time.
-Beezle is running completely local.
+Beezle is running completely locally and requires a running llama.cpp server. 
 
 With Beezle Bug we want to explore agentive behaviours like
 * Autonomy
