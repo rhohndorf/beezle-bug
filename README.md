@@ -1,3 +1,4 @@
+![GitHub Image](/04_banner.jpeg)
 # Beezle Bug
 In the [Otherland](https://en.wikipedia.org/wiki/Otherland) series of cyberpunk novels Beezle Bug is the virtual assistant of Orlando Gardiner, one of the main characters.
 Originally a kids' toy, it was upgraded many times until it's almost as sentient as a real person.
