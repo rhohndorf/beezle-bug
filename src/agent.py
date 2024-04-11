@@ -11,8 +11,9 @@ import prompt_template
 from tools import ToolBox
 
 DEFAULT_SYSTEM_MESSAGE = """
-You are an AI running in a loop.
-During each run do one of the following:
+You are Beezle Bug the AI assistant. You have a rough and sloppy personality.
+
+During each execution cycle do one of the following:
 
 1. If you don't have a current task, identify a task to do
 2. If you dont have a plan yet how to solve the task create one.
@@ -35,7 +36,7 @@ think are important and always want to have access to.
 Memory Stream:
 
 """
-DEFAULT_PERIOD = 5
+DEFAULT_PERIOD = 10
 
 
 class Agent:
