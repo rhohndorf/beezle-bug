@@ -24,12 +24,14 @@ class Calculator(Tool):
 
     def run(self, agent):
         if self.operation == MathOperation.ADD:
-            return self.number_one + self.number_two
+            result = self.number_one + self.number_two
         elif self.operation == MathOperation.SUBTRACT:
-            return self.number_one - self.number_two
+            result = self.number_one - self.number_two
         elif self.operation == MathOperation.MULTIPLY:
-            return self.number_one * self.number_two
+            result = self.number_one * self.number_two
         elif self.operation == MathOperation.DIVIDE:
-            return self.number_one / self.number_two
+            result = self.number_one / self.number_two
         else:
             raise ValueError("Unknown operation.")
+
+        return f"{self.number_one} {self.operation} {self.number_two} = {result}"
