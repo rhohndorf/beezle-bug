@@ -11,6 +11,7 @@ Beezle Bug has a predefined set of tools:
 - Write text files
 - List directory content
 - Get time and date
+- Execute a cli command. This is buggy and dangerous. Be warned!
 
 ## Memory Management
 - Add to working memory
