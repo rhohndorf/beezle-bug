@@ -25,7 +25,7 @@ class AddWorkingMemory(Tool):
     value: str = Field(..., description="")
 
     def run(self, agent):
-        agent.working_memory.add(self.key, self.value)
+        return agent.working_memory.add(self.key, self.value)
 
 
 class UpdateWorkingMemory(Tool):
@@ -37,7 +37,7 @@ class UpdateWorkingMemory(Tool):
     value: str = Field(..., description="")
 
     def run(self, agent):
-        agent.working_memory.update(self.key, self.value)
+        return agent.working_memory.update(self.key, self.value)
 
 
 class DeleteWorkingMemory(Tool):
@@ -48,4 +48,4 @@ class DeleteWorkingMemory(Tool):
     key: str = Field(..., description="")
 
     def run(self, agent):
-        agent.working_memory.delete(self.key)
+        return agent.working_memory.delete(self.key)

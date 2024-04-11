@@ -18,13 +18,12 @@ With Beezle Bug we want to explore agentive behaviours like
 * Self Improvement
 
 ### Autonomy
-Beezle Bug is an autonomous and proactive agent. First and foremost that means it's not waiting for user input 
-to kickstart its internal processes but it's continously running 
+Beezle Bug is an autonomous and proactive agent.
 
 What's working ?
 - [x] Run continuously every n seconds
-- [x] Decide what to do next by choosing from a number of actions on every turn
-- [x] Manage memories 
+- [x] [Tool Use](docs/tools.md)
+- [x] [Memory Management](docs/memory_management.md)
 - [ ] Planning
 
 ### Cooperation
