@@ -1,6 +1,7 @@
 from typing import List
 from pydantic import Field
 
+from planning.task import Task
 from tools import Tool
 
 
@@ -15,6 +16,19 @@ class MakePlan(Tool):
 
     def run(self, agent):
         return self.model_dump_json()
+
+
+class CreateTask(Tool):
+    """
+    Create a task
+    """
+
+    name: str = Field(..., description="The task name")
+    description: str = Field(..., description="The task description")
+
+    def run(self, agent):
+        task = Task(name=self.name, description=self.description, solution="")
+        return task.model_dump_json()
 
 
 class AssessTaskSolution(Tool):
