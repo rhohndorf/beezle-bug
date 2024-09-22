@@ -1,48 +1,39 @@
-from datetime import datetime
+from pydantic import BaseModel, Field
 from typing import List
-
-import math
+from datetime import datetime
 import numpy as np
+import math
 
 
-class BaseMemory:
-    DECAY = 0.999
+# class BaseMemory(BaseModel):
+#     DECAY: float = 0.999
+#     created: datetime = Field(default_factory=datetime.now)
+#     accessed: datetime = Field(default_factory=datetime.now)
+#     importance: float
+#     embedding: np.ndarray
 
-    def __init__(self, importance: float, embedding: np.ndarray) -> None:
-        self.created = datetime.now()
-        self.accessed = datetime.now()
-        self.importance = importance
-        self.embedding = embedding
+#     @property
+#     def recency(self) -> float:
+#         elapsed_hours = (datetime.now() - self.accessed).total_seconds() / 3600
+#         return 1.0 * math.exp(-self.DECAY * elapsed_hours)
 
-    @property
-    def recency(self) -> float:
-        elapsed_hours = (datetime.now() - self.accessed).total_seconds() / 3600
-        return 1.0 * math.exp(-BaseMemory.DECAY * elapsed_hours)
+#     def relevance(self, embedding: List[float]) -> float:
+#         A = self.embedding
+#         B = np.array(embedding)
 
-    def relevance(self, embedding: List[float]) -> float:
-        # Define your vectors A and B as NumPy arrays
-        A = self.embedding
-        B = embedding
+#         dot_product = np.dot(A, B)
+#         magnitude_A = np.linalg.norm(A)
+#         magnitude_B = np.linalg.norm(B)
 
-        # Calculate the dot product
-        dot_product = np.dot(A, B)
+#         return dot_product / (magnitude_A * magnitude_B)
 
-        # Calculate the magnitudes of the vectors
-        magnitude_A = np.linalg.norm(A)
-        magnitude_B = np.linalg.norm(B)
-
-        # Calculate the cosine similarity
-        return dot_product / (magnitude_A * magnitude_B)
-
-    def score(self, embedding: List[float]):
-        return (self.recency + self.importance + self.relevance(embedding)) / 3.0
+#     def score(self, embedding: List[float]) -> float:
+#         return (self.recency + self.importance + self.relevance(embedding)) / 3.0
 
 
-class Observation(BaseMemory):
-    def __init__(self, role: str, fact: str, importance: float, embedding: np.ndarray) -> None:
-        super().__init__(importance, embedding)
-        self.content = fact
-        self.role = role
+class Observation(BaseModel):
+    role: str
+    content: str
 
     def __str__(self):
         return f"{self.role}: {self.content}"

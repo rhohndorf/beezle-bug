@@ -3,7 +3,7 @@ import logging
 from queue import Queue
 
 from agent import Agent
-from llm_adapter.llama_cpp_adapter import LlamaCppApiAdapter
+from llm_adapter import LlamaCppApiAdapter, GroqApiAdapter
 from tools import ToolBox
 from tools.math import Calculator
 from tools.messaging.local import SendMessageToUser
@@ -55,6 +55,9 @@ def main():
         elif user_input == "/stop":
             agent.stop()
         elif user_input == "/start":
+            agent.start()
+        elif user_input == "/restart":
+            agent.stop()
             agent.start()
         else:
             event_queue.put(user_input)

@@ -14,7 +14,7 @@ class MemoryStream:
 
     def add(self, role: str, statement: str) -> None:
         embedding = list(self.embedding_model.query_embed(statement))[0]
-        observation = Observation(role, statement, 0.0, embedding)
+        observation = Observation(role=role, content=statement)
         self.memories.append(observation)
 
     def retrieve(self, text: str, k: int) -> List[Observation]:

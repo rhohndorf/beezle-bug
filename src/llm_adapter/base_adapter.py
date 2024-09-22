@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 
+from memory import Observation
+from tools.toolbox import ToolBox
+
 
 class BaseAdapter(ABC):
     """
@@ -53,7 +56,7 @@ class BaseAdapter(ABC):
         pass
 
     @abstractmethod
-    def chat_completion(self):
+    def chat_completion(self, messages: list[Observation], tools: ToolBox) -> str:
         """
         Abstract method to be implemented by subclasses.
 
