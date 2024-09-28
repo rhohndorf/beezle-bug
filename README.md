@@ -5,9 +5,6 @@ Originally a kids' toy, it was upgraded many times until it's almost as sentient
 Beezle Bug has two different forms of appearance. In the virtual world it appears as a creature with many arms and legs. It can also download itself into a spider-like toy robot in the physical world.
 
 
-* [Vision and Goals](#vision)
-
-
 ## Vision and Goals
 Like its fictional counterpart our Beezle Bug agent starts as a limited toy project and will hopefully grow into a useful tool over time.
 Beezle is running completely locally and requires a running llama.cpp server. 
