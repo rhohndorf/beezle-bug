@@ -3,7 +3,7 @@ from typing import Union
 
 from pydantic import Field
 
-from tools import Tool
+from beezle_bug.tools import Tool
 
 
 class MathOperation(Enum):

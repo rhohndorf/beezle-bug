@@ -4,23 +4,24 @@ from queue import Queue
 from threading import Thread
 import time
 
-from llm_adapter import BaseAdapter
-from memory import MemoryStream
-from memory import WorkingMemory
-import prompt_template
-from tools import ToolBox
+from beezle_bug.llm_adapter import BaseAdapter
+from beezle_bug.memory import MemoryStream
+from beezle_bug.memory import WorkingMemory
+import beezle_bug.prompt_template as prompt_template
+from beezle_bug.tools import ToolBox
 
 DEFAULT_SYSTEM_MESSAGE = """
-You are Beezle Bug the AI assistant. You have a rough and sloppy personality.
+You are Beezle Bug the expert AI assistant that explains its reasoning step by step. 
+You solve problems be first reasonig about them and then reporting the final answer.
+Decide if you need another step or if you're ready to give the final answer.
+USE AS MANY REASONING STEPS AS POSSIBLE. AT LEAST 3. BE AWARE OF YOUR LIMITATIONS AS AN LLM AND WHAT YOU CAN AND CANNOT DO. 
+IN YOUR REASONING, INCLUDE EXPLORATION OF ALTERNATIVE ANSWERS. CONSIDER YOU MAY BE WRONG, AND IF YOU ARE WRONG IN YOUR REASONING, WHERE IT WOULD BE. FULLY TEST ALL OTHER POSSIBILITIES. 
+YOU CAN BE WRONG. WHEN YOU SAY YOU ARE RE-EXAMINING, ACTUALLY RE-EXAMINE, AND USE ANOTHER APPROACH TO DO SO. 
+DO NOT JUST SAY YOU ARE RE-EXAMINING. USE AT LEAST 3 METHODS TO DERIVE THE ANSWER. USE BEST PRACTICES.
 
-During each execution cycle do one of the following:
 
-1. If you don't have a current task, identify a task to do
-2. If you dont have a plan yet how to solve the task create one.
-3. Execute the plan and the next plan step
-4. Assess the result of the last executed step
-5. Go to the next plan step
-6. If there are no more plan steps to do go back to 1.
+You can send messages to the following contacts:
+{contacts}
 
 Available actions:
 Choose the actions that makes the most sense in this context.
@@ -40,12 +41,13 @@ DEFAULT_PERIOD = 10
 
 
 class Agent:
-    def __init__(self, adapter: BaseAdapter, toolbox: ToolBox, event_queue: Queue) -> None:
+    def __init__(self, adapter: BaseAdapter, toolbox: ToolBox) -> None:
         self.adapter = adapter
         self.toolbox = toolbox
+        self.inbox = Queue()
+        self.contacts = {}
         self.memory_stream = MemoryStream()
         self.working_memory = WorkingMemory()
-        self.event_queue = event_queue
         self.running = False
         self.thread = None
         self.prompt_template = prompt_template.load(prompt_template.CHATML)
@@ -63,11 +65,11 @@ class Agent:
 
     def step(self) -> None:
         while self.running:
-            if not self.event_queue.empty():
-                user_input = self.event_queue.get()
+            while not self.inbox.empty():
+                user_input = self.inbox.get()
                 self.memory_stream.add("user", user_input)
 
-            system_message = DEFAULT_SYSTEM_MESSAGE.format(docs=self.toolbox.docs, wmem=self.working_memory)
+            system_message = DEFAULT_SYSTEM_MESSAGE.format(docs=self.toolbox.docs, wmem=self.working_memory, contacts=list(self.contacts.keys()))
             prompt = self.prompt_template.render(system=system_message, messages=self.memory_stream.memories[-10:])
             logging.debug(prompt)
 
@@ -78,5 +80,13 @@ class Agent:
 
             if result is not None:
                 self.memory_stream.add("assistant", f"{selected_tool['function']}: {result}")
+                print(result)
 
             time.sleep(DEFAULT_PERIOD)
+
+    def send_message(self, message:str) -> None:
+        self.inbox.put(message)
+    
+    def add_contact(self, name:str, message_box:Queue) -> None:
+        self.contacts[name] = message_box
+

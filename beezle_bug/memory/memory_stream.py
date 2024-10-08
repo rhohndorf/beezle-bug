@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 from fastembed import TextEmbedding
-from memory.memories import Observation
+from beezle_bug.memory.memories import Observation
 
 
 class MemoryStream:

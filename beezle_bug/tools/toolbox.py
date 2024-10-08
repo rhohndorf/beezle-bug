@@ -2,7 +2,7 @@ from typing import Dict, List, Type
 
 from pydantic_gbnf_grammar_generator import generate_gbnf_grammar_and_documentation
 
-from tools import Tool
+from beezle_bug.tools import Tool
 
 
 class ToolBox:

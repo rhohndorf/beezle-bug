@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 from pydantic import Field
 import requests
 
-from tools import Tool
+from beezle_bug.tools import Tool
 
 
 class ScrapeWebsite(Tool):

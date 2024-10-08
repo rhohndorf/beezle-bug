@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chatroom</title>
+    <!-- Link to external CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-header">Chatroom</div>
+        <div id="messages"></div>
+        <div id="chat-input-area">
+            <input type="text" id="messageInput" placeholder="Enter your message">
+            <button id="sendButton" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+    <script>
+        // Connect to the WebSocket server
+        const socket = io();
+
+        // Listen for messages from the server
+        socket.on('chat_message', function(data) {
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = `${data.user}: ${data.message}`;
+            document.getElementById('messages').appendChild(messageDiv);
+            // Scroll to the latest message
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        });
+
+        // Send message to the server
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value;
+            if (message) {
+                socket.emit('send_message', { user: 'WebClient', message: message });
+                messageInput.value = '';
+            }
+        }
+
+        // Auto-focus the input field
+        document.getElementById('messageInput').focus();
+    </script>
+</body>
+</html>
