@@ -40,7 +40,7 @@ What's working ?
 - [ ] Create new primitive tools
 - [ ] Fine tune self on collected data
 
-### Examples
+## Examples
 
 #### Web Chat
 There is a web chat example [here](examples/webchat/README.md)
