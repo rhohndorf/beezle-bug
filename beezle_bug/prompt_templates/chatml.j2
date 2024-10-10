@@ -3,4 +3,4 @@
 {% for message in messages %}
 {{ '<|im_start|>' + message.role + '\n' + message.content.strip() + '<|im_end|>' }}
 {% endfor %}
-{{ '<|im_start|>assistant\n' }}
+{{ '<|im_start|>'+ agent_name +'\n' }}

@@ -13,8 +13,8 @@ class SendMessage(Tool):
 
     def run(self, agent):
 
-        # if self.contact not in agent.contacts:
-        #     return
+        if self.contact not in agent.contacts:
+            return
         inbox = agent.contacts[self.contact]
         inbox.put(self.message)
         return self.message

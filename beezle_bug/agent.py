@@ -11,7 +11,7 @@ import beezle_bug.prompt_template as prompt_template
 from beezle_bug.tools import ToolBox
 
 DEFAULT_SYSTEM_MESSAGE = """
-You are Beezle Bug the expert AI assistant that explains its reasoning step by step. 
+You are {name} the expert AI assistant that explains its reasoning step by step. 
 You solve problems be first reasonig about them and then reporting the final answer.
 Decide if you need another step or if you're ready to give the final answer.
 USE AS MANY REASONING STEPS AS POSSIBLE. AT LEAST 3. BE AWARE OF YOUR LIMITATIONS AS AN LLM AND WHAT YOU CAN AND CANNOT DO. 
@@ -37,11 +37,12 @@ think are important and always want to have access to.
 Memory Stream:
 
 """
-DEFAULT_PERIOD = 10
+DEFAULT_PERIOD = 5
 
 
 class Agent:
-    def __init__(self, adapter: BaseAdapter, toolbox: ToolBox) -> None:
+    def __init__(self, adapter: BaseAdapter, toolbox: ToolBox, name="Beezle Bug") -> None:
+        self.name = name
         self.adapter = adapter
         self.toolbox = toolbox
         self.inbox = Queue()
@@ -66,27 +67,35 @@ class Agent:
     def step(self) -> None:
         while self.running:
             while not self.inbox.empty():
-                user_input = self.inbox.get()
-                self.memory_stream.add("user", user_input)
+                user, msg = self.inbox.get()
+                self.memory_stream.add(user, msg)
 
-            system_message = DEFAULT_SYSTEM_MESSAGE.format(docs=self.toolbox.docs, wmem=self.working_memory, contacts=list(self.contacts.keys()))
-            prompt = self.prompt_template.render(system=system_message, messages=self.memory_stream.memories[-10:])
+            system_message = DEFAULT_SYSTEM_MESSAGE.format(
+                name=self.name,
+                docs=self.toolbox.docs,
+                wmem=self.working_memory,
+                contacts=list(self.contacts.keys()),
+            )
+            prompt = self.prompt_template.render(
+                agent_name=self.name, system=system_message, messages=self.memory_stream.memories[-100:]
+            )
             logging.debug(prompt)
 
-            selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
-            logging.debug(selected_tool)
-            tool = self.toolbox.get_tool(selected_tool)
-            result = tool.run(self)
+            try:
+                selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
+                logging.debug(selected_tool)
+                tool = self.toolbox.get_tool(selected_tool)
+                result = tool.run(self)
 
-            if result is not None:
-                self.memory_stream.add("assistant", f"{selected_tool['function']}: {result}")
-                print(result)
+                if result is not None:
+                    self.memory_stream.add(self.name, f"{selected_tool['function']}: {result}")
+            except Exception as e:
+                logging.exception(e)
 
             time.sleep(DEFAULT_PERIOD)
 
-    def send_message(self, message:str) -> None:
+    def send_message(self, message: tuple[str, str]) -> None:
         self.inbox.put(message)
-    
-    def add_contact(self, name:str, message_box:Queue) -> None:
-        self.contacts[name] = message_box
 
+    def add_contact(self, name: str, message_box: Queue) -> None:
+        self.contacts[name] = message_box
