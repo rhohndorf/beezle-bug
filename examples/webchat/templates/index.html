@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chatroom</title>
+    <!-- Link to external CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div id="name-container">
+        <label for="usernameInput">Enter your name:</label>
+        <input type="text" id="usernameInput" placeholder="Your name">
+        <button id="setNameButton" onclick="setUsername()">Set Name</button>
+    </div>
+    <div id="chat-container" style="display:none">
+        <div id="chat-header">Chatroom</div>
+        <div id="messages"></div>
+        <div id="chat-input-area">
+            <textarea id="messageInput" placeholder="Enter your message"></textarea>
+            <button id="sendButton" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+    <script>
+        // Connect to the WebSocket server
+        const socket = io();
+        let username="";
+
+        function setUsername() {
+            const usernameInput = document.getElementById('usernameInput');
+            if (usernameInput.value.trim()) {
+                username = usernameInput.value.trim();
+                document.getElementById('name-container').style.display = 'none'; // Hide name input
+                document.getElementById('chat-container').style.display = 'flex'; // Show chatroom
+                document.getElementById('messageInput').focus(); // Focus on message input
+            } else {
+                alert('Please enter a valid name');
+            }
+        }
+    
+        // Listen for messages from the server
+        socket.on('chat_message', function(data) {
+            const messageDiv = document.createElement('div');
+            const userDiv = document.createElement('div');
+            const textDiv = document.createElement('div');
+    
+            // Set the content for user and message
+            userDiv.textContent = data.user;
+            textDiv.textContent = data.message;
+    
+            // Add the appropriate classes
+            if (data.user === username) {
+                messageDiv.classList.add('message', 'my-message');
+            } else {
+                messageDiv.classList.add('message', 'other-message');
+            }
+    
+            userDiv.classList.add('message-user');  // New class for the username
+            textDiv.classList.add('message-text');  // New class for the message text
+    
+            // Append the user and text divs to the main message div
+            messageDiv.appendChild(userDiv);
+            messageDiv.appendChild(textDiv);
+    
+            document.getElementById('messages').appendChild(messageDiv);
+            // Scroll to the latest message
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        });
+    
+        // Send message to the server
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value;
+            if (message) {
+                socket.emit('send_message', { user: username, message: message });
+                messageInput.value = '';
+            }
+        }
+    
+        // Auto-focus the input field
+        document.getElementById('messageInput').focus();
+    
+        // Allow sending message with Enter key
+        document.getElementById('messageInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); // Prevent adding a new line
+                sendMessage();
+            }
+        });
+    </script>
+    
+</body>
+</html>

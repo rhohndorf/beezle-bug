@@ -3,10 +3,10 @@ import json
 
 from pydantic import Field
 
-from tools import Tool
+from beezle_bug.tools import Tool
 
 
-class Yield(Tool):
+class Wait(Tool):
     """
     Just do nothing.
     This is the best tool to choose in most cases, when there is no active task to be completed.
@@ -16,10 +16,10 @@ class Yield(Tool):
         return
 
 
-class Think(Tool):
+class Reason(Tool):
     """
-    Choose this tool to take time and think about the current situation.
-    Think step by step what to do next.
+    Choose this tool to take time and reason about the problem at hand.
+    Think step by step.
     """
 
     thought: str = Field(..., description="Your thought")

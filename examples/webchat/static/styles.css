@@ -1,0 +1,146 @@
+/* General reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background-color: #f4f7f6;
+    color: #333;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0;
+}
+
+#chat-container {
+    width: 95%;
+    max-width: 1000px;
+    background-color: #fff;
+    box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    height: 90vh; /* Set height to 90% of the viewport */
+}
+
+/* Chat header */
+#chat-header {
+    background-color: #007bff;
+    color: white;
+    padding: 15px;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: bold;
+    border-bottom: 1px solid #0077e6;
+}
+
+/* Chat messages area */
+#messages {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    background-color: #f4f7f6;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Styling for the message container */
+#messages .message {
+    padding: 5px 10px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    box-shadow: 0px 1px 3px rgba(0, 0, 0, 0.1);
+    max-width: 80%; /* Limit width to avoid stretching too much */
+    word-wrap: break-word;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Styling for the username */
+#messages .message-user {
+    font-weight: bold;
+    margin-bottom: 3px; /* Slight gap between username and message text */
+    font-size: 0.9rem;
+    color: #007bff; /* Make the username visually distinct */
+}
+
+/* Styling for the message text */
+#messages .message-text {
+    font-size: 1rem;
+}
+
+/* My messages - Right alignment */
+#messages .my-message {
+    align-self: flex-end;
+    background-color: white;
+    color: #333;
+    text-align: left;
+}
+
+/* Other users' messages - Left alignment */
+#messages .other-message {
+    align-self: flex-start;
+    background-color: #e1ffe1;
+    color: #333;
+    text-align: left;
+}
+
+/* Chat input area */
+#chat-input-area {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #eee;
+    background-color: #fafafa;
+}
+
+#messageInput {
+    flex: 1;
+    padding: 15px;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    outline: none;
+}
+
+#messageInput:focus {
+    border-color: #007bff;
+}
+
+#sendButton {
+    margin-left: 10px;
+    padding: 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+#sendButton:hover {
+    background-color: #0056b3;
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+    #chat-container {
+        width: 95%;
+    }
+
+    #chat-header {
+        font-size: 1.2rem;
+    }
+
+    #messageInput {
+        font-size: 0.9rem;
+    }
+
+    #sendButton {
+        font-size: 0.9rem;
+    }
+}

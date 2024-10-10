@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 from pydantic import Field
 import requests
 
-from tools import Tool
+from beezle_bug.tools import Tool
 
 
 class ScrapeWebsite(Tool):
@@ -38,18 +38,20 @@ class SearchWeb(Tool):
     )
 
     def run(self, agent):
-        url = f"https://duckduckgo.com/html/?q={self.query}"
+        search_url = f"https://duckduckgo.com/html/?q={self.query}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
         }
-        response = requests.get(url, headers=headers)
+        response = requests.get(search_url, headers=headers)
 
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
             search_results = soup.find_all("a", class_="result__a")
             results_string = f'{{"search query": "{self.query}", "results": ['
             for i, result in enumerate(search_results):
-                results_string += f' {{"link text": "{result.get_text()}" , "url": "{result['href']}"}},\n'
+                link_text = result.get_text()
+                url = result["href"]
+                results_string += f' {{"link text": "{link_text}" , "url": "{url}"}},\n'
             results_string += "]}"
 
             return results_string.strip()
