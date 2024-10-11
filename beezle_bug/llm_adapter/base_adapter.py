@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-from memory import Observation
-from tools.toolbox import ToolBox
+from beezle_bug.memory import Observation
+from beezle_bug.tools.toolbox import ToolBox
 
 
 class BaseAdapter(ABC):

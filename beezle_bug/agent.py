@@ -1,18 +1,16 @@
 import logging
-import json
 from queue import Queue
 from threading import Thread
 import time
 
 from beezle_bug.llm_adapter import BaseAdapter
-from beezle_bug.memory import MemoryStream
-from beezle_bug.memory import WorkingMemory
+from beezle_bug.memory import MemoryStream, WorkingMemory, Observation, ToolResponse
 import beezle_bug.prompt_template as prompt_template
 from beezle_bug.tools import ToolBox
 
 DEFAULT_SYSTEM_MESSAGE = """
 You are {name} the expert AI assistant that explains its reasoning step by step. 
-You solve problems be first reasonig about them and then reporting the final answer.
+You solve problems by first reasonig about them and then reporting the final answer.
 Decide if you need another step or if you're ready to give the final answer.
 USE AS MANY REASONING STEPS AS POSSIBLE. AT LEAST 3. BE AWARE OF YOUR LIMITATIONS AS AN LLM AND WHAT YOU CAN AND CANNOT DO. 
 IN YOUR REASONING, INCLUDE EXPLORATION OF ALTERNATIVE ANSWERS. CONSIDER YOU MAY BE WRONG, AND IF YOU ARE WRONG IN YOUR REASONING, WHERE IT WOULD BE. FULLY TEST ALL OTHER POSSIBILITIES. 
@@ -68,7 +66,7 @@ class Agent:
         while self.running:
             while not self.inbox.empty():
                 user, msg = self.inbox.get()
-                self.memory_stream.add(user, msg)
+                self.memory_stream.add(Observation(role="user", content=msg))
 
             system_message = DEFAULT_SYSTEM_MESSAGE.format(
                 name=self.name,
@@ -76,19 +74,22 @@ class Agent:
                 wmem=self.working_memory,
                 contacts=list(self.contacts.keys()),
             )
-            prompt = self.prompt_template.render(
-                agent_name=self.name, system=system_message, messages=self.memory_stream.memories[-100:]
-            )
-            logging.debug(prompt)
-
+            logging.debug(system_message)
+            messages = [
+                Observation(role="system", content=system_message),
+                # Observation(role="user", content=""),
+            ] + self.memory_stream.memories[-10:]
+            logging.info(messages)
             try:
-                selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
+                selected_tool = self.adapter.chat_completion(messages, self.toolbox)
                 logging.debug(selected_tool)
                 tool = self.toolbox.get_tool(selected_tool)
                 result = tool.run(self)
 
                 if result is not None:
-                    self.memory_stream.add(self.name, f"{selected_tool['function']}: {result}")
+                    self.memory_stream.add(
+                        ToolResponse(name=selected_tool["function"], tool_call_id=selected_tool["id"], content=result)
+                    )
             except Exception as e:
                 logging.exception(e)
 

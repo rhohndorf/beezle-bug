@@ -42,6 +42,6 @@ What's working ?
 
 ## Examples
 
-#### Web Chat
+### Web Chat
 There is a web chat example [here](examples/webchat/README.md)
 ![Alt text](imgs/webchat.png)

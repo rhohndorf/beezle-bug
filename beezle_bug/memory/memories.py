@@ -40,3 +40,13 @@ class Observation(BaseModel):
 
     def __repr__(self) -> str:
         return str(self)
+
+
+class ToolResponse(Observation):
+    name: str
+    tool_call_id: str
+
+    def __init__(self, **data):
+        # Set role to "tool" before calling the parent constructor
+        data["role"] = "tool"
+        super().__init__(**data)

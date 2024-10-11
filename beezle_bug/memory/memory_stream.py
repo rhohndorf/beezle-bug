@@ -12,9 +12,8 @@ class MemoryStream:
         self.last_reflection_point = 0
         self.embedding_model = TextEmbedding()
 
-    def add(self, role: str, statement: str) -> None:
-        embedding = list(self.embedding_model.query_embed(statement))[0]
-        observation = Observation(role=role, content=statement)
+    def add(self, observation: Observation) -> None:
+        embedding = list(self.embedding_model.query_embed(observation.content))[0]
         self.memories.append(observation)
 
     def retrieve(self, text: str, k: int) -> List[Observation]:
