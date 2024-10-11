@@ -1,8 +1,8 @@
 from typing import List
 from pydantic import Field
 
-from planning.task import Task
-from tools import Tool
+from beezle_bug.planning.task import Task
+from beezle_bug.tools import Tool
 
 
 class MakePlan(Tool):

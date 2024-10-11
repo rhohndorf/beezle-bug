@@ -1,6 +1,6 @@
 import logging
 from pydantic import Field
-from tools import Tool
+from beezle_bug.tools import Tool
 
 
 class Recall(Tool):

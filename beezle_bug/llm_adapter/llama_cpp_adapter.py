@@ -1,9 +1,9 @@
 import json
 import requests
 
-from llm_adapter import BaseAdapter
-from memory import Observation
-from tools.toolbox import ToolBox
+from beezle_bug.llm_adapter import BaseAdapter
+from beezle_bug.memory import Observation
+from beezle_bug.tools import ToolBox
 
 DEFAULT_URL = "http://localhost"
 DEFAULT_PORT = 8080

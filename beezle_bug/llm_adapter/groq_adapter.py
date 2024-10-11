@@ -7,12 +7,11 @@ from typing import Any, Type, Union
 from pydantic import BaseModel
 from groq import Groq
 
-from llm_adapter import BaseAdapter
-from memory.memories import Observation
-from tools.tool import Tool
-from tools.toolbox import ToolBox
+from beezle_bug.llm_adapter import BaseAdapter
+from beezle_bug.memory import Observation
+from beezle_bug.tools import Tool, ToolBox
 
-DEFAULT_MODEL = "llama3.1-70b"
+DEFAULT_MODEL = "mixtral-8x7b-32768"
 TYPEMAP = {
     Any: {"type": "any"},
     str: {"type": "string"},
@@ -35,7 +34,7 @@ class GroqApiAdapter(BaseAdapter):
 
     def chat_completion(self, messages: list[Observation], tools: ToolBox) -> str:
         response = self.client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+            model=DEFAULT_MODEL,
             messages=[message.model_dump() for message in messages],
             tools=_translate_tools(tools),
             tool_choice="required",
@@ -52,6 +51,7 @@ def _process_output(response):
     return {
         "function": name,
         "function_parameters": arguments,
+        "id": tool_call.id,
     }
 
 

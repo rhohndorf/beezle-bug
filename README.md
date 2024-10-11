@@ -1,11 +1,8 @@
-![GitHub Image](/04_banner.jpeg)
+![GitHub Image](imgs/banner.jpeg)
 # Beezle Bug
 In the [Otherland](https://en.wikipedia.org/wiki/Otherland) series of cyberpunk novels Beezle Bug is the virtual assistant of Orlando Gardiner, one of the main characters.
 Originally a kids' toy, it was upgraded many times until it's almost as sentient as a real person.
 Beezle Bug has two different forms of appearance. In the virtual world it appears as a creature with many arms and legs. It can also download itself into a spider-like toy robot in the physical world.
-
-
-* [Vision and Goals](#vision)
 
 
 ## Vision and Goals
@@ -42,3 +39,9 @@ What's working ?
 - [ ] Create new compound tools
 - [ ] Create new primitive tools
 - [ ] Fine tune self on collected data
+
+## Examples
+
+#### Web Chat
+There is a web chat example [here](examples/webchat/README.md)
+![Alt text](imgs/webchat.png)
