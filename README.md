@@ -43,5 +43,6 @@ What's working ?
 ## Examples
 
 #### Web Chat
-There is a web chat example [here](examples/webchat/README.md)
+There is a web chat example [here](examples/webchat/README.md).
+The example in the image below uses Gemma2-9B. It shows nicely how the agent can execute multiple actions without having to be prompted each time.
 ![Alt text](imgs/webchat.png)

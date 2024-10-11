@@ -19,7 +19,9 @@ class Wait(Tool):
 class Reason(Tool):
     """
     Choose this tool to take time and reason about the problem at hand.
-    Think step by step.
+    This is an intermediate step in a larger train of thought.
+    Take the information you have so far and think step by step.
+    Try to produce new insights that help you solve the bigger problem.
     """
 
     thought: str = Field(..., description="Your thought")

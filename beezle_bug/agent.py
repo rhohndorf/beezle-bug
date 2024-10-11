@@ -11,7 +11,7 @@ import beezle_bug.prompt_template as prompt_template
 from beezle_bug.tools import ToolBox
 
 DEFAULT_SYSTEM_MESSAGE = """
-You are {name} the expert AI assistant that explains its reasoning step by step. 
+You are {name} the friendly expert AI assistant that explains its reasoning step by step. 
 You solve problems be first reasonig about them and then reporting the final answer.
 Decide if you need another step or if you're ready to give the final answer.
 USE AS MANY REASONING STEPS AS POSSIBLE. AT LEAST 3. BE AWARE OF YOUR LIMITATIONS AS AN LLM AND WHAT YOU CAN AND CANNOT DO. 
@@ -41,7 +41,9 @@ DEFAULT_PERIOD = 5
 
 
 class Agent:
-    def __init__(self, adapter: BaseAdapter, toolbox: ToolBox, name="Beezle Bug") -> None:
+    def __init__(
+        self, adapter: BaseAdapter, toolbox: ToolBox, name="Beezle Bug", template: str = prompt_template.GEMMA
+    ) -> None:
         self.name = name
         self.adapter = adapter
         self.toolbox = toolbox
@@ -51,7 +53,7 @@ class Agent:
         self.working_memory = WorkingMemory()
         self.running = False
         self.thread = None
-        self.prompt_template = prompt_template.load(prompt_template.CHATML)
+        self.prompt_template = prompt_template.load(template)
 
     def start(self) -> None:
         if not self.running:
@@ -90,7 +92,7 @@ class Agent:
                 if result is not None:
                     self.memory_stream.add(self.name, f"{selected_tool['function']}: {result}")
             except Exception as e:
-                logging.exception(e)
+                self.memory_stream.add(self.name, f"{str(e)}")
 
             time.sleep(DEFAULT_PERIOD)
 

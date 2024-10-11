@@ -14,7 +14,7 @@ class SendMessage(Tool):
     def run(self, agent):
 
         if self.contact not in agent.contacts:
-            return
+            return f"Error: {self.contact} is not a valid contact. Valid contacts are {list(agent.contacts)}"
         inbox = agent.contacts[self.contact]
         inbox.put(self.message)
         return self.message

@@ -1,0 +1,6 @@
+{{ '<start_of_turn>system\n' + system.strip() + '<end_of_turn>\n' }}
+
+{% for message in messages %}
+{{ '<start_of_turn>' + message.role + '\n' + message.content.strip() + '<end_of_turn>' }}
+{% endfor %}
+{{ '<start_of_turn>'+ agent_name +'\n' }}
