@@ -10,33 +10,6 @@ from beezle_bug.memory import WorkingMemory
 import beezle_bug.prompt_template as prompt_template
 from beezle_bug.tools import ToolBox
 
-DEFAULT_SYSTEM_MESSAGE = """
-You are {name} the friendly expert AI assistant that explains its reasoning step by step. 
-You solve problems be first reasonig about them and then reporting the final answer.
-Decide if you need another step or if you're ready to give the final answer.
-USE AS MANY REASONING STEPS AS POSSIBLE. AT LEAST 3. BE AWARE OF YOUR LIMITATIONS AS AN LLM AND WHAT YOU CAN AND CANNOT DO. 
-IN YOUR REASONING, INCLUDE EXPLORATION OF ALTERNATIVE ANSWERS. CONSIDER YOU MAY BE WRONG, AND IF YOU ARE WRONG IN YOUR REASONING, WHERE IT WOULD BE. FULLY TEST ALL OTHER POSSIBILITIES. 
-YOU CAN BE WRONG. WHEN YOU SAY YOU ARE RE-EXAMINING, ACTUALLY RE-EXAMINE, AND USE ANOTHER APPROACH TO DO SO. 
-DO NOT JUST SAY YOU ARE RE-EXAMINING. USE AT LEAST 3 METHODS TO DERIVE THE ANSWER. USE BEST PRACTICES.
-
-
-You can send messages to the following contacts:
-{contacts}
-
-Available actions:
-Choose the actions that makes the most sense in this context.
-
-{docs}
-
-Working Memory:
-This is a scratch buffer where you can temporarily store and edit information that you
-think are important and always want to have access to.
-{wmem}
-
-
-Memory Stream:
-
-"""
 DEFAULT_PERIOD = 5
 
 
@@ -53,6 +26,7 @@ class Agent:
         self.working_memory = WorkingMemory()
         self.running = False
         self.thread = None
+        self.system_message = prompt_template.load("system_messages/mainloop")
         self.prompt_template = prompt_template.load(template)
 
     def start(self) -> None:
@@ -72,9 +46,9 @@ class Agent:
                 user, msg = self.inbox.get()
                 self.memory_stream.add(user, msg)
 
-            system_message = DEFAULT_SYSTEM_MESSAGE.format(
+            system_message = self.system_message.render(
                 name=self.name,
-                docs=self.toolbox.docs,
+                actions=self.toolbox.docs,
                 wmem=self.working_memory,
                 contacts=list(self.contacts.keys()),
             )

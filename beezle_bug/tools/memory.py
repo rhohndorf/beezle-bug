@@ -18,7 +18,8 @@ class Recall(Tool):
 
 class AddWorkingMemory(Tool):
     """
-    Add a memory to the working memory
+    Add important information to your working memory. This information will always be accesible to you.
+    You cannot add keys that already exist. If you want to change the value of an existing key, you either have to update or delete the memory first.
     """
 
     key: str = Field(..., description="")
