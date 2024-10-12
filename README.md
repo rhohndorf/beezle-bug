@@ -45,4 +45,6 @@ What's working ?
 #### Web Chat
 There is a web chat example [here](examples/webchat/README.md).
 The example in the image below uses Gemma2-9B. It shows nicely how the agent can execute multiple actions without having to be prompted each time.
-![Alt text](imgs/webchat.png)
+![Counting to ten](imgs/webchat.png)
+This is pretty solid for such a small model.
+![Help writing an essay on womens voting rights](imgs/webchat_voting-rights.png)

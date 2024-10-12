@@ -5,7 +5,10 @@ from beezle_bug.tools import Tool
 
 class SendMessage(Tool):
     """
-    Send a message to a contact. Use this tool to convey information to the contact.
+    Send a message to a contact.
+    Use this tool only if you want to convey information to a contact.
+    For example to ask a clarifying question or to inform the contact about results of your thinking.
+    Don't repeat yourself!
     """
 
     contact: str = Field(..., description="The name of the contact to send a message to")

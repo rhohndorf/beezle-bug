@@ -7,9 +7,10 @@ import requests
 from beezle_bug.tools import Tool
 
 
-class ScrapeWebsite(Tool):
+class VisitWebsite(Tool):
     """
-    Scrape the content of a website given its URL.
+    Supply a URL and retrieve the website content.
+    You can then analyze the content for useful information.
     """
 
     url: str = Field(

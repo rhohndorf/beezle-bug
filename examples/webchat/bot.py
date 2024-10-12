@@ -10,7 +10,7 @@ from beezle_bug.tools import ToolBox
 from beezle_bug.tools.math import Calculator
 from beezle_bug.tools.messaging import SendMessage
 from beezle_bug.tools.system import Wait, GetDateAndTime, SelfReflect, SelfCritique, Reason
-from beezle_bug.tools.web import ScrapeWebsite, SearchWeb
+from beezle_bug.tools.web import VisitWebsite, SearchWeb
 from beezle_bug.tools.tasks import MakePlan
 from beezle_bug.tools.memory import Recall, AddWorkingMemory, UpdateWorkingMemory, DeleteWorkingMemory
 
@@ -77,13 +77,13 @@ if __name__ == "__main__":
             # SelfCritique,
             # Calculator,
             # GetDateAndTime,
-            # # ScrapeWebsite,
-            # # SearchWeb,
-            # MakePlan,
+            # VisitWebsite,
+            # SearchWeb,
+            MakePlan,
             # # Recall,
-            # AddWorkingMemory,
-            # UpdateWorkingMemory,
-            # DeleteWorkingMemory,
+            AddWorkingMemory,
+            UpdateWorkingMemory,
+            DeleteWorkingMemory,
         ]
     )
     adapter = LlamaCppApiAdapter()

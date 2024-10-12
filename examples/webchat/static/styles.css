@@ -50,7 +50,7 @@ body {
 
 /* Styling for the message container */
 #messages .message {
-    padding: 5px 10px;
+    padding: 10px 15px;
     margin-bottom: 10px;
     border-radius: 5px;
     box-shadow: 0px 1px 3px rgba(0, 0, 0, 0.1);
@@ -58,6 +58,7 @@ body {
     word-wrap: break-word;
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
 }
 
 /* Styling for the username */
@@ -71,6 +72,20 @@ body {
 /* Styling for the message text */
 #messages .message-text {
     font-size: 1rem;
+    word-wrap: break-word;
+    white-space: pre-wrap; /* Preserve whitespace and line breaks */
+}
+
+/* Handle markdown-generated lists inside messages */
+#messages .message-text ul, 
+#messages .message-text ol {
+    margin: 10px 0; /* Add some spacing around lists */
+    padding-left: 20px; /* Ensure lists are indented */
+    list-style-position: inside; /* Keep bullets inside the container */
+}
+
+#messages .message-text li {
+    margin-bottom: 5px; /* Space between list items */
 }
 
 /* My messages - Right alignment */
