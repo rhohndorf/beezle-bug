@@ -11,6 +11,7 @@ Beezle is running completely locally and requires a running llama.cpp server.
 
 With Beezle Bug we want to explore agentive behaviours like
 * Autonomy
+* Open-Endedness
 * Cooperation
 * Self Improvement
 
