@@ -7,10 +7,9 @@ import requests
 from beezle_bug.tools import Tool
 
 
-class VisitWebsite(Tool):
+class ReadWebsite(Tool):
     """
-    Supply a URL and retrieve the website content.
-    You can then analyze the content for useful information.
+    Retrieve the website content to analyze it and extrtact for useful information.
     """
 
     url: str = Field(

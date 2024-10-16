@@ -2,17 +2,18 @@ import asyncio
 from logging import debug, basicConfig, DEBUG, INFO
 import socketio
 from queue import Queue
-import argparse  # Import argparse to handle command-line arguments
+import argparse
 
 from beezle_bug.agent import Agent
 from beezle_bug.llm_adapter.llama_cpp_adapter import LlamaCppApiAdapter
 from beezle_bug.tools import ToolBox
 from beezle_bug.tools.math import Calculator
 from beezle_bug.tools.messaging import SendMessage
-from beezle_bug.tools.system import Wait, GetDateAndTime, SelfReflect, SelfCritique, Reason
-from beezle_bug.tools.web import VisitWebsite, SearchWeb
+from beezle_bug.tools.system import Wait, GetDateAndTime, SelfReflect, SelfCritique, Reason, SetEngagement
+from beezle_bug.tools.web import ReadWebsite, SearchWeb
 from beezle_bug.tools.tasks import MakePlan
 from beezle_bug.tools.memory import Recall, AddWorkingMemory, UpdateWorkingMemory, DeleteWorkingMemory
+from beezle_bug.tools.os.filesystem import GetFileList, ReadTextFile, WriteTextFile
 
 # Async Socket.IO client
 sio = socketio.AsyncClient()
@@ -73,17 +74,21 @@ if __name__ == "__main__":
             SendMessage,
             Reason,
             Wait,
-            # SelfReflect,
-            # SelfCritique,
+            SetEngagement,
+            SelfReflect,
+            SelfCritique,
             # Calculator,
             # GetDateAndTime,
-            # VisitWebsite,
-            # SearchWeb,
+            ReadWebsite,
+            SearchWeb,
             MakePlan,
             # # Recall,
             AddWorkingMemory,
             UpdateWorkingMemory,
             DeleteWorkingMemory,
+            # GetFileList,
+            # ReadTextFile,
+            # WriteTextFile,
         ]
     )
     adapter = LlamaCppApiAdapter()
