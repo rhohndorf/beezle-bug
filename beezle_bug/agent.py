@@ -10,7 +10,9 @@ from beezle_bug.memory import WorkingMemory
 import beezle_bug.prompt_template as prompt_template
 from beezle_bug.tools import ToolBox
 
-DEFAULT_PERIOD = 5
+DEFAULT_LOOP_DELAY = 5
+MIN_LOOP_DELAY = 1
+MAX_LOOP_DELAY = 30
 
 
 class Agent:
@@ -28,6 +30,7 @@ class Agent:
         self.thread = None
         self.system_message = prompt_template.load("system_messages/mainloop")
         self.prompt_template = prompt_template.load(template)
+        self.loop_delay = DEFAULT_LOOP_DELAY
 
     def start(self) -> None:
         if not self.running:
@@ -53,7 +56,7 @@ class Agent:
                 contacts=list(self.contacts.keys()),
             )
             prompt = self.prompt_template.render(
-                agent_name=self.name, system=system_message, messages=self.memory_stream.memories[-100:]
+                agent_name=self.name, system=system_message, messages=self.memory_stream.memories[-30:]
             )
             logging.debug(prompt)
 
@@ -68,10 +71,16 @@ class Agent:
             except Exception as e:
                 self.memory_stream.add(self.name, f"{str(e)}")
 
-            time.sleep(DEFAULT_PERIOD)
+            time.sleep(self.loop_delay)
 
     def send_message(self, message: tuple[str, str]) -> None:
         self.inbox.put(message)
+        self.loop_delay = DEFAULT_LOOP_DELAY
 
     def add_contact(self, name: str, message_box: Queue) -> None:
         self.contacts[name] = message_box
+
+    def set_engagement(self, engagement: int) -> None:
+        delay = 100 - engagement
+        delay = int(MIN_LOOP_DELAY + (delay - 1) * (MAX_LOOP_DELAY - MIN_LOOP_DELAY) / (100 - 1))
+        self.loop_delay = delay

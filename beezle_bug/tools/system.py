@@ -31,6 +31,23 @@ class Reason(Tool):
         return self.thought
 
 
+class SetEngagement(Tool):
+    """
+    Controls how active you are on the scale from 1 to 100.
+    Lower values mean slower thinking and less energy consumption.
+    Higher values mean faster thinking and more energy consumption.
+    Choose lower values when you don't have a lot to do and higher values when you are very busy.
+    """
+
+    engagement: int = Field(..., description="")
+
+    def run(self, agent):
+        if self.engagement < 1 or self.engagement > 100:
+            return "Error: Engagement value must be in the range from 1-100"
+        agent.set_engagement(self.engagement)
+        return f"Engagement succesfully set to {self.engagement}."
+
+
 class SelfReflect(Tool):
     """
     Choose this tool to take time to assess current situation
