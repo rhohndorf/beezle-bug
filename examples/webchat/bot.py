@@ -2,17 +2,19 @@ import asyncio
 from logging import debug, basicConfig, DEBUG, INFO
 import socketio
 from queue import Queue
-import argparse  # Import argparse to handle command-line arguments
+import argparse
 
 from beezle_bug.agent import Agent
 from beezle_bug.llm_adapter import LlamaCppApiAdapter, GroqApiAdapter
 from beezle_bug.tools import ToolBox
 from beezle_bug.tools.math import Calculator
 from beezle_bug.tools.messaging import SendMessage
-from beezle_bug.tools.system import Wait, GetDateAndTime, SelfReflect, SelfCritique, Reason
-from beezle_bug.tools.web import ScrapeWebsite, SearchWeb
+from beezle_bug.tools.system import Wait, GetDateAndTime, SelfReflect, SelfCritique, Reason, SetEngagement
+from beezle_bug.tools.wikipedia import SearchWikipedia, GetWikipediaPageSummary
+from beezle_bug.tools.web import ReadWebsite, SearchWeb
 from beezle_bug.tools.tasks import MakePlan
 from beezle_bug.tools.memory import Recall, AddWorkingMemory, UpdateWorkingMemory, DeleteWorkingMemory
+from beezle_bug.tools.os.filesystem import GetFileList, ReadTextFile, WriteTextFile
 
 # Async Socket.IO client
 sio = socketio.AsyncClient()
@@ -73,17 +75,23 @@ if __name__ == "__main__":
             SendMessage,
             Reason,
             Wait,
-            # SelfReflect,
-            # SelfCritique,
+            SetEngagement,
+            SelfReflect,
+            SelfCritique,
             # Calculator,
             # GetDateAndTime,
-            # # ScrapeWebsite,
-            # # SearchWeb,
-            # MakePlan,
+            SearchWikipedia,
+            GetWikipediaPageSummary,
+            ReadWebsite,
+            SearchWeb,
+            MakePlan,
             # # Recall,
-            # AddWorkingMemory,
-            # UpdateWorkingMemory,
-            # DeleteWorkingMemory,
+            AddWorkingMemory,
+            UpdateWorkingMemory,
+            DeleteWorkingMemory,
+            # GetFileList,
+            # ReadTextFile,
+            # WriteTextFile,
         ]
     )
     adapter = GroqApiAdapter()

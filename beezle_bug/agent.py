@@ -8,6 +8,7 @@ from beezle_bug.memory import MemoryStream, WorkingMemory, Observation, ToolResp
 import beezle_bug.prompt_template as prompt_template
 from beezle_bug.tools import ToolBox
 
+<<<<<<< HEAD
 DEFAULT_SYSTEM_MESSAGE = """
 You are {name} the expert AI assistant that explains its reasoning step by step. 
 You solve problems by first reasonig about them and then reporting the final answer.
@@ -36,10 +37,17 @@ Memory Stream:
 
 """
 DEFAULT_PERIOD = 5
+=======
+DEFAULT_LOOP_DELAY = 5
+MIN_LOOP_DELAY = 1
+MAX_LOOP_DELAY = 30
+>>>>>>> main
 
 
 class Agent:
-    def __init__(self, adapter: BaseAdapter, toolbox: ToolBox, name="Beezle Bug") -> None:
+    def __init__(
+        self, adapter: BaseAdapter, toolbox: ToolBox, name="Beezle Bug", template: str = prompt_template.GEMMA
+    ) -> None:
         self.name = name
         self.adapter = adapter
         self.toolbox = toolbox
@@ -49,7 +57,9 @@ class Agent:
         self.working_memory = WorkingMemory()
         self.running = False
         self.thread = None
-        self.prompt_template = prompt_template.load(prompt_template.CHATML)
+        self.system_message = prompt_template.load("system_messages/mainloop")
+        self.prompt_template = prompt_template.load(template)
+        self.loop_delay = DEFAULT_LOOP_DELAY
 
     def start(self) -> None:
         if not self.running:
@@ -68,9 +78,9 @@ class Agent:
                 user, msg = self.inbox.get()
                 self.memory_stream.add(Observation(role="user", content=msg))
 
-            system_message = DEFAULT_SYSTEM_MESSAGE.format(
+            system_message = self.system_message.render(
                 name=self.name,
-                docs=self.toolbox.docs,
+                actions=self.toolbox.docs,
                 wmem=self.working_memory,
                 contacts=list(self.contacts.keys()),
             )
@@ -91,12 +101,18 @@ class Agent:
                         ToolResponse(name=selected_tool["function"], tool_call_id=selected_tool["id"], content=result)
                     )
             except Exception as e:
-                logging.exception(e)
+                self.memory_stream.add(self.name, f"{str(e)}")
 
-            time.sleep(DEFAULT_PERIOD)
+            time.sleep(self.loop_delay)
 
     def send_message(self, message: tuple[str, str]) -> None:
         self.inbox.put(message)
+        self.loop_delay = DEFAULT_LOOP_DELAY
 
     def add_contact(self, name: str, message_box: Queue) -> None:
         self.contacts[name] = message_box
+
+    def set_engagement(self, engagement: int) -> None:
+        delay = 100 - engagement
+        delay = int(MIN_LOOP_DELAY + (delay - 1) * (MAX_LOOP_DELAY - MIN_LOOP_DELAY) / (100 - 1))
+        self.loop_delay = delay

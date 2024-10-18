@@ -11,6 +11,7 @@ Beezle is running completely locally and requires a running llama.cpp server.
 
 With Beezle Bug we want to explore agentive behaviours like
 * Autonomy
+* Open-Endedness
 * Cooperation
 * Self Improvement
 
@@ -42,6 +43,9 @@ What's working ?
 
 ## Examples
 
-### Web Chat
-There is a web chat example [here](examples/webchat/README.md)
-![Alt text](imgs/webchat.png)
+#### Web Chat
+There is a web chat example [here](examples/webchat/README.md).
+The example in the image below uses Gemma2-9B. It shows nicely how the agent can execute multiple actions without having to be prompted each time.
+![Counting to ten](imgs/webchat_countdown.png)
+This is pretty solid for such a small model.
+![Help writing an essay on womens voting rights](imgs/webchat_voting-rights.png)

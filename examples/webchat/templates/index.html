@@ -6,6 +6,8 @@
     <title>WebSocket Chatroom</title>
     <!-- Link to external CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <!-- Include the marked.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div id="name-container">
@@ -26,7 +28,7 @@
     <script>
         // Connect to the WebSocket server
         const socket = io();
-        let username="";
+        let username = "";
 
         function setUsername() {
             const usernameInput = document.getElementById('usernameInput');
@@ -39,36 +41,37 @@
                 alert('Please enter a valid name');
             }
         }
-    
+
         // Listen for messages from the server
         socket.on('chat_message', function(data) {
             const messageDiv = document.createElement('div');
             const userDiv = document.createElement('div');
             const textDiv = document.createElement('div');
-    
+
             // Set the content for user and message
             userDiv.textContent = data.user;
-            textDiv.textContent = data.message;
-    
+            // Convert markdown to HTML and inject into the text div
+            textDiv.innerHTML = marked.parse(data.message);
+
             // Add the appropriate classes
             if (data.user === username) {
                 messageDiv.classList.add('message', 'my-message');
             } else {
                 messageDiv.classList.add('message', 'other-message');
             }
-    
+
             userDiv.classList.add('message-user');  // New class for the username
             textDiv.classList.add('message-text');  // New class for the message text
-    
+
             // Append the user and text divs to the main message div
             messageDiv.appendChild(userDiv);
             messageDiv.appendChild(textDiv);
-    
+
             document.getElementById('messages').appendChild(messageDiv);
             // Scroll to the latest message
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
         });
-    
+
         // Send message to the server
         function sendMessage() {
             const messageInput = document.getElementById('messageInput');
@@ -78,10 +81,10 @@
                 messageInput.value = '';
             }
         }
-    
+
         // Auto-focus the input field
         document.getElementById('messageInput').focus();
-    
+
         // Allow sending message with Enter key
         document.getElementById('messageInput').addEventListener('keypress', function(event) {
             if (event.key === 'Enter' && !event.shiftKey) {
