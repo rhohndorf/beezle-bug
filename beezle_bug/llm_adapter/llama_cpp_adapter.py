@@ -18,7 +18,7 @@ class LlamaCppApiAdapter(BaseAdapter):
     def completion(self, prompt, grammar) -> str:
         endpoint_url = f"{self.url}:{self.port}/completion"
         headers = {"Content-Type": "application/json"}
-        data = {"prompt": prompt, "grammar": grammar, "stop": ["<|im_end|>", "<|endoftext|>"]}
+        data = {"prompt": prompt, "grammar": grammar, "stop": ["<|im_end|>", "<end_of_turn>"]}
         response = requests.post(endpoint_url, headers=headers, json=data)
         data = response.json()
         return data["content"]
