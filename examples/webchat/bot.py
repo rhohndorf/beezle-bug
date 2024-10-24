@@ -5,7 +5,7 @@ from queue import Queue
 import argparse
 
 from beezle_bug.agent import Agent
-from beezle_bug.llm_adapter import LlamaCppApiAdapter, GroqApiAdapter
+from beezle_bug.llm_adapter import LlamaCppApiAdapter, GroqApiAdapter, OllamaApiAdapter
 from beezle_bug.tools import ToolBox
 from beezle_bug.tools.math import Calculator
 from beezle_bug.tools.messaging import SendMessage
@@ -80,21 +80,21 @@ if __name__ == "__main__":
             SelfCritique,
             # Calculator,
             # GetDateAndTime,
-            SearchWikipedia,
-            GetWikipediaPageSummary,
-            ReadWebsite,
-            SearchWeb,
-            MakePlan,
+            # SearchWikipedia,
+            # GetWikipediaPageSummary,
+            # ReadWebsite,
+            # SearchWeb,
+            # MakePlan,
             # # Recall,
-            AddWorkingMemory,
-            UpdateWorkingMemory,
-            DeleteWorkingMemory,
+            # AddWorkingMemory,
+            # UpdateWorkingMemory,
+            # DeleteWorkingMemory,
             # GetFileList,
             # ReadTextFile,
             # WriteTextFile,
         ]
     )
-    adapter = GroqApiAdapter()
+    adapter = OllamaApiAdapter()
     agent = Agent(adapter, toolbox, name=args.name)
     agent.add_contact("Chatroom", messages)
     agent.start()

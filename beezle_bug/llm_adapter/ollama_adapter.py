@@ -4,15 +4,13 @@ import logging
 import os
 from typing import Any, Type, Union
 
+import ollama
 from pydantic import BaseModel
-from groq import Groq
 
-from llm_adapter import BaseAdapter
-from memory.memories import Observation
-from tools.tool import Tool
-from tools.toolbox import ToolBox
+from beezle_bug.llm_adapter import BaseAdapter
+from beezle_bug.memory import Observation
+from beezle_bug.tools import Tool, ToolBox
 
-DEFAULT_MODEL = "llama3.1-70b"
 TYPEMAP = {
     Any: {"type": "any"},
     str: {"type": "string"},
@@ -23,32 +21,26 @@ TYPEMAP = {
 }
 
 
-class GroqApiAdapter(BaseAdapter):
-    def __init__(self) -> None:
-        self.client = Groq(
-            api_key=os.environ.get("GROQ_API_KEY"),
-        )
-        super().__init__()
+class OllamaApiAdapter(BaseAdapter):
 
     def completion(self, prompt, grammar) -> str:
         return ""
 
     def chat_completion(self, messages: list[Observation], tools: ToolBox) -> str:
-        response = self.client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+        response = ollama.chat(
+            model="llama3.1",
             messages=[message.model_dump() for message in messages],
             tools=_translate_tools(tools),
-            tool_choice="required",
         )
         logging.debug(response)
         return _process_output(response)
 
 
 def _process_output(response):
-    tool_call = response.choices[0].message.tool_calls[0]
+    tool_call = response["message"]["tool_calls"]
     logging.debug(tool_call)
-    arguments = json.loads(tool_call.function.arguments)
-    name = tool_call.function.name
+    arguments = tool_call["function"]["arguments"]
+    name = tool_call["function"]["name"]
     return {
         "function": name,
         "function_parameters": arguments,

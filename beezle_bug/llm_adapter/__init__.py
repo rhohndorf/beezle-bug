@@ -1,3 +1,4 @@
 from beezle_bug.llm_adapter.base_adapter import BaseAdapter
 from beezle_bug.llm_adapter.groq_adapter import GroqApiAdapter
+from beezle_bug.llm_adapter.ollama_adapter import OllamaApiAdapter
 from beezle_bug.llm_adapter.llama_cpp_adapter import LlamaCppApiAdapter

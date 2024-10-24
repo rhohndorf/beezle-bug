@@ -8,40 +8,9 @@ from beezle_bug.memory import MemoryStream, WorkingMemory, Observation, ToolResp
 import beezle_bug.prompt_template as prompt_template
 from beezle_bug.tools import ToolBox
 
-<<<<<<< HEAD
-DEFAULT_SYSTEM_MESSAGE = """
-You are {name} the expert AI assistant that explains its reasoning step by step. 
-You solve problems by first reasonig about them and then reporting the final answer.
-Decide if you need another step or if you're ready to give the final answer.
-USE AS MANY REASONING STEPS AS POSSIBLE. AT LEAST 3. BE AWARE OF YOUR LIMITATIONS AS AN LLM AND WHAT YOU CAN AND CANNOT DO. 
-IN YOUR REASONING, INCLUDE EXPLORATION OF ALTERNATIVE ANSWERS. CONSIDER YOU MAY BE WRONG, AND IF YOU ARE WRONG IN YOUR REASONING, WHERE IT WOULD BE. FULLY TEST ALL OTHER POSSIBILITIES. 
-YOU CAN BE WRONG. WHEN YOU SAY YOU ARE RE-EXAMINING, ACTUALLY RE-EXAMINE, AND USE ANOTHER APPROACH TO DO SO. 
-DO NOT JUST SAY YOU ARE RE-EXAMINING. USE AT LEAST 3 METHODS TO DERIVE THE ANSWER. USE BEST PRACTICES.
-
-
-You can send messages to the following contacts:
-{contacts}
-
-Available actions:
-Choose the actions that makes the most sense in this context.
-
-{docs}
-
-Working Memory:
-This is a scratch buffer where you can temporarily store and edit information that you
-think are important and always want to have access to.
-{wmem}
-
-
-Memory Stream:
-
-"""
-DEFAULT_PERIOD = 5
-=======
 DEFAULT_LOOP_DELAY = 5
 MIN_LOOP_DELAY = 1
 MAX_LOOP_DELAY = 30
->>>>>>> main
 
 
 class Agent:
@@ -75,8 +44,8 @@ class Agent:
     def step(self) -> None:
         while self.running:
             while not self.inbox.empty():
-                user, msg = self.inbox.get()
-                self.memory_stream.add(Observation(role="user", content=msg))
+                username, msg = self.inbox.get()
+                self.memory_stream.add(Observation(role="user", content=f"{username}:{msg}"))
 
             system_message = self.system_message.render(
                 name=self.name,
@@ -101,7 +70,7 @@ class Agent:
                         ToolResponse(name=selected_tool["function"], tool_call_id=selected_tool["id"], content=result)
                     )
             except Exception as e:
-                self.memory_stream.add(self.name, f"{str(e)}")
+                self.memory_stream.add(Observation(role="assitant", content=f"{str(e)}"))
 
             time.sleep(self.loop_delay)
 
@@ -115,4 +84,4 @@ class Agent:
     def set_engagement(self, engagement: int) -> None:
         delay = 100 - engagement
         delay = int(MIN_LOOP_DELAY + (delay - 1) * (MAX_LOOP_DELAY - MIN_LOOP_DELAY) / (100 - 1))
-        self.loop_delay = delay
+        # self.loop_delay = delay

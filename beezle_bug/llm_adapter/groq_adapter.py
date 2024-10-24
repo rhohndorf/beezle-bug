@@ -1,10 +1,8 @@
-from enum import Enum
 import json
 import logging
 import os
 from typing import Any, Type, Union
 
-from pydantic import BaseModel
 from groq import Groq
 
 from beezle_bug.llm_adapter import BaseAdapter
