@@ -1,6 +1,0 @@
-{{ '<|im_start|>system\n' + system.strip() + '<|im_end|>\n' }}
-
-{% for message in messages %}
-{{ '<|im_start|>' + message.role + '\n' + message.content.strip() + '<|im_end|>' }}
-{% endfor %}
-{{ '<|im_start|>'+ agent_name +'\n' }}
