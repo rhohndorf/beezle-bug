@@ -6,6 +6,7 @@ import argparse
 
 from beezle_bug.agent import Agent
 from beezle_bug.llm_adapter.llama_cpp_adapter import LlamaCppApiAdapter
+from beezle_bug.llm_config import LLAMA, GEMMA
 from beezle_bug.tools import ToolBox
 from beezle_bug.tools.messaging import SendMessage
 from beezle_bug.tools.memory import Recall, AddWorkingMemory, UpdateWorkingMemory, DeleteWorkingMemory
@@ -94,7 +95,7 @@ if __name__ == "__main__":
             # WriteTextFile,
         ]
     )
-    adapter = LlamaCppApiAdapter()
+    adapter = LlamaCppApiAdapter(LLAMA)
     agent = Agent(adapter, toolbox, name=args.name)
     agent.add_contact("Chatroom", messages)
     agent.start()

@@ -33,7 +33,7 @@ class BaseAdapter(ABC):
     """
 
     @abstractmethod
-    def completion(self, prompt, grammar) -> str:
+    def completion(self, messages, grammar) -> str:
         """
         Abstract method to be implemented by subclasses.
 

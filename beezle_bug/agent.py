@@ -5,20 +5,19 @@ from threading import Thread
 import time
 
 from beezle_bug.llm_adapter import BaseAdapter
-from beezle_bug.memory import MemoryStream
+from beezle_bug.memory import MemoryStream, Observation
 from beezle_bug.memory import WorkingMemory
-import beezle_bug.prompt_template as prompt_template
+import beezle_bug.template as template
 from beezle_bug.tools import ToolBox
 
 DEFAULT_LOOP_DELAY = 5
 MIN_LOOP_DELAY = 1
 MAX_LOOP_DELAY = 30
+DEFAULT_MSG_BUFFER_SIZE = 10
 
 
 class Agent:
-    def __init__(
-        self, adapter: BaseAdapter, toolbox: ToolBox, name="Beezle Bug", template: str = prompt_template.GEMMA
-    ) -> None:
+    def __init__(self, adapter: BaseAdapter, toolbox: ToolBox, name="Beezle Bug") -> None:
         self.name = name
         self.adapter = adapter
         self.toolbox = toolbox
@@ -28,8 +27,7 @@ class Agent:
         self.working_memory = WorkingMemory()
         self.running = False
         self.thread = None
-        self.system_message = prompt_template.load("system_messages/mainloop")
-        self.prompt_template = prompt_template.load(template)
+        self.system_message = template.load("system_messages/mainloop")
         self.loop_delay = DEFAULT_LOOP_DELAY
 
     def start(self) -> None:
@@ -55,13 +53,15 @@ class Agent:
                 wmem=self.working_memory,
                 contacts=list(self.contacts.keys()),
             )
-            prompt = self.prompt_template.render(
-                agent_name=self.name, system=system_message, messages=self.memory_stream.memories[-30:]
-            )
-            logging.debug(prompt)
-
+            # prompt = self.prompt_template.render(
+            #     agent_name=self.name, system=system_message, messages=self.memory_stream.memories[-30:]
+            # )
+            logging.debug(system_message)
+            messages = [Observation("system", system_message, 0, None)] + self.memory_stream.memories[
+                -DEFAULT_MSG_BUFFER_SIZE:
+            ]
             try:
-                selected_tool = json.loads(self.adapter.completion(prompt, self.toolbox.grammar))
+                selected_tool = json.loads(self.adapter.completion(messages, self.toolbox.grammar))
                 logging.debug(selected_tool)
                 tool = self.toolbox.get_tool(selected_tool)
                 result = tool.run(self)
@@ -69,6 +69,7 @@ class Agent:
                 if result is not None:
                     self.memory_stream.add(self.name, f"{selected_tool['function']}: {result}")
             except Exception as e:
+                logging.debug(str(e))
                 self.memory_stream.add(self.name, f"{str(e)}")
 
             time.sleep(self.loop_delay)
