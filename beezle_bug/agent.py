@@ -5,8 +5,8 @@ from threading import Thread
 import time
 
 from beezle_bug.llm_adapter import BaseAdapter
-from beezle_bug.memory import MemoryStream, Observation
-from beezle_bug.memory import WorkingMemory
+from beezle_bug.memory import MemoryStream, Observation, knowledge_graph
+from beezle_bug.memory import KnowledgeGraph
 import beezle_bug.template as template
 from beezle_bug.tools import ToolBox
 
@@ -24,7 +24,7 @@ class Agent:
         self.inbox = Queue()
         self.contacts = {}
         self.memory_stream = MemoryStream()
-        self.working_memory = WorkingMemory()
+        self.knowledge_graph = KnowledgeGraph()
         self.running = False
         self.thread = None
         self.system_message = template.load("system_messages/mainloop")
@@ -47,15 +47,8 @@ class Agent:
                 user, msg = self.inbox.get()
                 self.memory_stream.add(user, msg)
 
-            system_message = self.system_message.render(
-                name=self.name,
-                actions=self.toolbox.docs,
-                wmem=self.working_memory,
-                contacts=list(self.contacts.keys()),
-            )
-            # prompt = self.prompt_template.render(
-            #     agent_name=self.name, system=system_message, messages=self.memory_stream.memories[-30:]
-            # )
+            system_message = self.system_message.render(agent=self)
+
             logging.debug(system_message)
             messages = [Observation("system", system_message, 0, None)] + self.memory_stream.memories[
                 -DEFAULT_MSG_BUFFER_SIZE:

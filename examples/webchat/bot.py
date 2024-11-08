@@ -9,7 +9,15 @@ from beezle_bug.llm_adapter.llama_cpp_adapter import LlamaCppApiAdapter
 from beezle_bug.llm_config import LLAMA, GEMMA
 from beezle_bug.tools import ToolBox
 from beezle_bug.tools.messaging import SendMessage
-from beezle_bug.tools.memory import Recall, AddWorkingMemory, UpdateWorkingMemory, DeleteWorkingMemory
+from beezle_bug.tools.memory.memory_stream import Recall
+from beezle_bug.tools.memory.knowledge_graph import (
+    AddEntity,
+    AddPropertyToEntity,
+    AddRelationship,
+    # UpdateEntityPropertiesInKnowledgeGraph,
+    GetRelationships,
+    GetEntity,
+)
 from beezle_bug.tools.os.filesystem import GetFileList, ReadTextFile, WriteTextFile
 from beezle_bug.tools.python import ExecPythonCode
 from beezle_bug.tools.system import Wait, GetDateAndTime, SelfReflect, SelfCritique, Reason, SetEngagement
@@ -76,7 +84,7 @@ if __name__ == "__main__":
             SendMessage,
             Reason,
             Wait,
-            SetEngagement,
+            # SetEngagement,
             SelfReflect,
             SelfCritique,
             ExecPythonCode,
@@ -86,16 +94,22 @@ if __name__ == "__main__":
             ReadWebsite,
             SearchWeb,
             MakePlan,
-            # # Recall,
-            AddWorkingMemory,
-            UpdateWorkingMemory,
-            DeleteWorkingMemory,
+            Recall,
+            AddEntity,
+            AddPropertyToEntity,
+            AddRelationship,
+            GetEntity,
+            GetRelationships,
+            # UpdateEntityPropertiesInKnowledgeGraph,
+            # AddWorkingMemory,
+            # UpdateWorkingMemory,
+            # DeleteWorkingMemory,
             # GetFileList,
             # ReadTextFile,
             # WriteTextFile,
         ]
     )
-    adapter = LlamaCppApiAdapter(LLAMA)
+    adapter = LlamaCppApiAdapter(GEMMA)
     agent = Agent(adapter, toolbox, name=args.name)
     agent.add_contact("Chatroom", messages)
     agent.start()

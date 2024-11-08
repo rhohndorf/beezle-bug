@@ -1,3 +1,3 @@
 {% for message in messages %}
-{{ llm.msg_start + llm.hdr_start + message.role + llm.hdr_stop + '\n' + message.content.strip() + llm.msg_stop }}
+{{ llm.msg_start + llm.hdr_start + message.role + llm.hdr_stop + '\n' + message.content.strip() + '\n' + llm.msg_stop }}
 {% endfor %}
