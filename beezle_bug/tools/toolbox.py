@@ -23,3 +23,6 @@ class ToolBox:
         func_name = function_call["function"]
         func_pars = function_call["function_parameters"]
         return self.tools[func_name](**func_pars)
+
+    def get_tools(self) -> list[Tool]:
+        return self.tools.values()

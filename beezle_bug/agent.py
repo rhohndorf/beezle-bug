@@ -54,7 +54,7 @@ class Agent:
                 -DEFAULT_MSG_BUFFER_SIZE:
             ]
             try:
-                selected_tool = json.loads(self.adapter.completion(messages, self.toolbox.grammar))
+                selected_tool = json.loads(self.adapter.chat_completion(messages, self.toolbox.get_tools()))
                 logging.debug(selected_tool)
                 tool = self.toolbox.get_tool(selected_tool)
                 result = tool.run(self)

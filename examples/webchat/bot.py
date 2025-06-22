@@ -5,7 +5,7 @@ from queue import Queue
 import argparse
 
 from beezle_bug.agent import Agent
-from beezle_bug.llm_adapter.llama_cpp_adapter import LlamaCppApiAdapter
+from beezle_bug.llm_adapter import LlamaCppApiAdapter, OpenAiAdapter
 from beezle_bug.llm_config import LLAMA, GEMMA
 from beezle_bug.tools import ToolBox
 from beezle_bug.tools.messaging import SendMessage
@@ -109,7 +109,7 @@ if __name__ == "__main__":
             # WriteTextFile,
         ]
     )
-    adapter = LlamaCppApiAdapter(GEMMA)
+    adapter = OpenAiAdapter('Llama 3.2 3B Instruct', 'http://localhost:4891')
     agent = Agent(adapter, toolbox, name=args.name)
     agent.add_contact("Chatroom", messages)
     agent.start()
