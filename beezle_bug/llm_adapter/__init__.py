@@ -1,1 +1,0 @@
-from beezle_bug.llm_adapter.base_adapter import BaseAdapter

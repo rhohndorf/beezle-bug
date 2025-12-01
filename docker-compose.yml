@@ -1,0 +1,27 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    user: "${UID:-1000}:${GID:-1000}"  # Run as current user
+    network_mode: host
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BEEZLE_DATA_DIR=/app/data
+      - HF_HOME=/cache/huggingface
+    volumes:
+      - ./backend/beezle_bug:/app/beezle_bug
+      - ./backend/server.py:/app/server.py
+      - ./data:/app/data          # Bind mount for agent data
+      - ./cache:/cache            # Bind mount to avoid HF permissions issues
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
