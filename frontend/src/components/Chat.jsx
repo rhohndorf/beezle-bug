@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../lib/socket';
-import { Send, Terminal, Volume2, VolumeX, Loader2, Square } from 'lucide-react';
+import { Send, Terminal, Volume2, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useTTSContext } from '../context/TTSContext';
 
 // Custom components for markdown rendering
 const MarkdownComponents = {
@@ -111,57 +110,78 @@ const MarkdownComponents = {
   },
 };
 
-export default function Chat({ agentStatus }) {
-  const [messages, setMessages] = useState([]);
+export default function Chat({ agentStatus, messages, setMessages }) {
   const [input, setInput] = useState('');
-  const [speakingMessageId, setSpeakingMessageId] = useState(null);
+  const [playingMessageId, setPlayingMessageId] = useState(null);
   const messagesEndRef = useRef(null);
-  
-  // TTS context
-  const tts = useTTSContext();
-  const { speak, stop, isSpeaking, isLoading, isModelLoaded, loadingProgress, enabled, autoSpeak } = tts;
+  const audioRef = useRef(null);
+  const lastMessageCountRef = useRef(0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-  
-  // Handle speaking a message
-  const handleSpeak = async (messageId, text) => {
-    if (speakingMessageId === messageId && isSpeaking) {
-      // Stop current playback
-      stop();
-      setSpeakingMessageId(null);
-    } else {
-      // Start speaking this message
-      setSpeakingMessageId(messageId);
-      await speak(text);
-      setSpeakingMessageId(null);
-    }
-  };
-  
-  // Reset speaking state when TTS stops
-  useEffect(() => {
-    if (!isSpeaking && speakingMessageId !== null) {
-      setSpeakingMessageId(null);
-    }
-  }, [isSpeaking, speakingMessageId]);
 
+  // Auto-play audio for new messages
   useEffect(() => {
-    function onChatMessage(data) {
-      const newMessage = { id: Date.now(), user: data.user, text: data.message };
-      setMessages(prev => [...prev, newMessage]);
-      
-      // Auto-speak agent messages if enabled
-      if (autoSpeak && enabled && isAgentMessage(data.user)) {
-        // Small delay to let React render the message first
-        setTimeout(() => {
-          speak(data.message);
-        }, 100);
+    if (messages.length > lastMessageCountRef.current) {
+      const newMessages = messages.slice(lastMessageCountRef.current);
+      // Find the last message with audio
+      const messageWithAudio = newMessages.reverse().find(m => m.audioUrl);
+      if (messageWithAudio) {
+        playAudio(messageWithAudio.id, messageWithAudio.audioUrl);
       }
     }
-    socket.on('chat_message', onChatMessage);
-    return () => socket.off('chat_message', onChatMessage);
-  }, [autoSpeak, enabled, speak]);
+    lastMessageCountRef.current = messages.length;
+  }, [messages]);
+
+  // Check if a message is from an agent (not the user)
+  const isAgentMessage = (user) => user !== 'User';
+
+  const playAudio = (messageId, audioUrl) => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    
+    // Use URL directly if it's a data URL, otherwise prepend backend URL
+    const fullUrl = audioUrl.startsWith('data:') 
+      ? audioUrl 
+      : `http://localhost:5000${audioUrl}`;
+    
+    const audio = new Audio(fullUrl);
+    audioRef.current = audio;
+    setPlayingMessageId(messageId);
+    
+    audio.onended = () => {
+      setPlayingMessageId(null);
+      audioRef.current = null;
+    };
+    
+    audio.onerror = () => {
+      setPlayingMessageId(null);
+      audioRef.current = null;
+    };
+    
+    audio.play().catch(() => {
+      setPlayingMessageId(null);
+      audioRef.current = null;
+    });
+  };
+
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setPlayingMessageId(null);
+  };
+
+  const handleAudioClick = (messageId, audioUrl) => {
+    if (playingMessageId === messageId) {
+      stopAudio();
+    } else {
+      playAudio(messageId, audioUrl);
+    }
+  };
 
   const sendMessage = (e) => {
     e.preventDefault();
@@ -170,9 +190,6 @@ export default function Chat({ agentStatus }) {
       setInput('');
     }
   };
-
-  // Check if a message is from an agent (not the user)
-  const isAgentMessage = (user) => user !== 'User';
 
   // Get initials for the avatar
   const getInitials = (name) => {
@@ -203,7 +220,8 @@ export default function Chat({ agentStatus }) {
         )}
         {messages.map((msg) => {
           const isAgent = isAgentMessage(msg.user);
-          const isCurrentlySpeaking = speakingMessageId === msg.id && isSpeaking;
+          const isPlaying = playingMessageId === msg.id;
+          
           return (
             <div key={msg.id} className={`flex gap-3 ${!isAgent ? 'flex-row-reverse' : ''} group`}>
               <div className={`w-6 h-6 rounded-sm flex items-center justify-center text-[10px] font-bold border shrink-0 ${
@@ -217,22 +235,15 @@ export default function Chat({ agentStatus }) {
                 {isAgent && (
                   <div className="text-[10px] text-[#666] mb-1 flex items-center gap-2">
                     <span>{msg.user}</span>
-                    {enabled && (
+                    {msg.audioUrl && (
                       <button
-                        onClick={() => handleSpeak(msg.id, msg.text)}
+                        onClick={() => handleAudioClick(msg.id, msg.audioUrl)}
                         className={`opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[#2b2b2b] ${
-                          isCurrentlySpeaking ? 'opacity-100 text-[#3b82f6]' : 'text-[#666] hover:text-[#888]'
+                          isPlaying ? 'opacity-100 text-[#3b82f6]' : 'text-[#666] hover:text-[#888]'
                         }`}
-                        title={isCurrentlySpeaking ? 'Stop speaking' : 'Read aloud'}
-                        disabled={isLoading}
+                        title={isPlaying ? 'Stop' : 'Play audio'}
                       >
-                        {isLoading && speakingMessageId === msg.id ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : isCurrentlySpeaking ? (
-                          <Square size={12} />
-                        ) : (
-                          <Volume2 size={12} />
-                        )}
+                        {isPlaying ? <Square size={12} /> : <Volume2 size={12} />}
                       </button>
                     )}
                   </div>
@@ -270,6 +281,12 @@ export default function Chat({ agentStatus }) {
             placeholder="Type a message..."
             className="flex-1 bg-transparent text-[#e5e5e5] font-mono text-sm focus:outline-none placeholder-[#444444]"
           />
+          <button
+            type="submit"
+            className="p-2 text-[#888] hover:text-[#e5e5e5] transition-colors"
+          >
+            <Send size={16} />
+          </button>
         </form>
       </div>
     </div>

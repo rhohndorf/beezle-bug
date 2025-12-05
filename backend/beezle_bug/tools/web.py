@@ -1,350 +1,45 @@
 """
 Web search and browsing tools.
 
-Supports multiple search backends:
-- SearXNG (self-hosted, recommended)
-- Tavily (AI-focused, requires API key)
-- Brave Search (requires API key)
-- DuckDuckGo (fallback, may have rate limits)
+Uses DuckDuckGo HTML search (no API required).
 """
 
-import os
 from loguru import logger
-from typing import Optional, List, Dict, Any
-from abc import ABC, abstractmethod
-
 from bs4 import BeautifulSoup
 from pydantic import Field
+from urllib.parse import unquote, parse_qs, urlparse
 import requests
 
 from beezle_bug.tools import Tool
 
 
-# =============================================================================
-# Search Backends
-# =============================================================================
-
-class SearchBackend(ABC):
-    """Abstract base class for search backends."""
-    
-    @abstractmethod
-    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Perform a web search and return results."""
-        pass
-    
-    @abstractmethod
-    def search_news(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Perform a news search and return results."""
-        pass
+# Shared headers for all web requests
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 
 
-class SearXNGBackend(SearchBackend):
-    """
-    SearXNG backend - self-hosted metasearch engine.
+def _extract_ddg_url(href: str) -> str:
+    """Extract the actual URL from a DuckDuckGo redirect link."""
+    if not href:
+        return ""
     
-    Set SEARXNG_URL environment variable to your instance URL.
-    Example: http://localhost:8080 or https://searx.example.com
-    """
+    # DDG uses redirect URLs like: //duckduckgo.com/l/?uddg=ENCODED_URL&rut=...
+    if "duckduckgo.com/l/" in href:
+        parsed = urlparse(href)
+        params = parse_qs(parsed.query)
+        if "uddg" in params:
+            return unquote(params["uddg"][0])
     
-    def __init__(self):
-        self.base_url = os.environ.get("SEARXNG_URL", "http://localhost:8080")
+    # Direct URL (starts with http)
+    if href.startswith("http"):
+        return href
     
-    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        try:
-            response = requests.get(
-                f"{self.base_url}/search",
-                params={
-                    "q": query,
-                    "format": "json",
-                    "categories": "general",
-                },
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            results = []
-            for item in data.get("results", [])[:max_results]:
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("content", ""),
-                    "engine": item.get("engine", "")
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"SearXNG search error: {e}")
-            raise
+    # Protocol-relative URL
+    if href.startswith("//"):
+        return "https:" + href
     
-    def search_news(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        try:
-            response = requests.get(
-                f"{self.base_url}/search",
-                params={
-                    "q": query,
-                    "format": "json",
-                    "categories": "news",
-                },
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            results = []
-            for item in data.get("results", [])[:max_results]:
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("content", ""),
-                    "source": item.get("engine", ""),
-                    "date": item.get("publishedDate", "")
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"SearXNG news search error: {e}")
-            raise
-
-
-class TavilyBackend(SearchBackend):
-    """
-    Tavily backend - AI-focused search API.
-    
-    Set TAVILY_API_KEY environment variable.
-    Free tier: 1000 searches/month
-    """
-    
-    def __init__(self):
-        self.api_key = os.environ.get("TAVILY_API_KEY")
-        if not self.api_key:
-            raise ValueError("TAVILY_API_KEY environment variable not set")
-    
-    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        try:
-            response = requests.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": self.api_key,
-                    "query": query,
-                    "max_results": max_results,
-                    "include_answer": False,
-                },
-                timeout=15
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            results = []
-            for item in data.get("results", []):
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("content", ""),
-                    "score": item.get("score", 0)
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"Tavily search error: {e}")
-            raise
-    
-    def search_news(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        # Tavily doesn't have a separate news endpoint, use topic filter
-        try:
-            response = requests.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": self.api_key,
-                    "query": query,
-                    "max_results": max_results,
-                    "topic": "news",
-                    "include_answer": False,
-                },
-                timeout=15
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            results = []
-            for item in data.get("results", []):
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("content", ""),
-                    "date": item.get("published_date", "")
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"Tavily news search error: {e}")
-            raise
-
-
-class BraveBackend(SearchBackend):
-    """
-    Brave Search backend.
-    
-    Set BRAVE_API_KEY environment variable.
-    Free tier: 2000 queries/month
-    """
-    
-    def __init__(self):
-        self.api_key = os.environ.get("BRAVE_API_KEY")
-        if not self.api_key:
-            raise ValueError("BRAVE_API_KEY environment variable not set")
-    
-    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        try:
-            response = requests.get(
-                "https://api.search.brave.com/res/v1/web/search",
-                params={"q": query, "count": max_results},
-                headers={"X-Subscription-Token": self.api_key},
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            results = []
-            for item in data.get("web", {}).get("results", []):
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("description", "")
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"Brave search error: {e}")
-            raise
-    
-    def search_news(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        try:
-            response = requests.get(
-                "https://api.search.brave.com/res/v1/news/search",
-                params={"q": query, "count": max_results},
-                headers={"X-Subscription-Token": self.api_key},
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            results = []
-            for item in data.get("results", []):
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("description", ""),
-                    "source": item.get("source", ""),
-                    "date": item.get("age", "")
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"Brave news search error: {e}")
-            raise
-
-
-class DuckDuckGoBackend(SearchBackend):
-    """
-    DuckDuckGo backend using ddgs library.
-    
-    Note: May have rate limiting issues with heavy usage.
-    Recommended only as a fallback.
-    """
-    
-    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        try:
-            from duckduckgo_search import DDGS
-            
-            with DDGS() as ddgs:
-                raw_results = list(ddgs.text(query, max_results=max_results))
-            
-            results = []
-            for item in raw_results:
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("href", ""),
-                    "snippet": item.get("body", "")
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"DuckDuckGo search error: {e}")
-            raise
-    
-    def search_news(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        try:
-            from duckduckgo_search import DDGS
-            
-            with DDGS() as ddgs:
-                raw_results = list(ddgs.news(query, max_results=max_results))
-            
-            results = []
-            for item in raw_results:
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("body", ""),
-                    "source": item.get("source", ""),
-                    "date": item.get("date", "")
-                })
-            return results
-            
-        except Exception as e:
-            logger.error(f"DuckDuckGo news search error: {e}")
-            raise
-
-
-# =============================================================================
-# Backend Selection
-# =============================================================================
-
-def get_search_backend() -> SearchBackend:
-    """
-    Get the configured search backend.
-    
-    Priority order:
-    1. SEARXNG_URL - if set, use SearXNG
-    2. TAVILY_API_KEY - if set, use Tavily
-    3. BRAVE_API_KEY - if set, use Brave
-    4. DuckDuckGo - fallback (may have rate limits)
-    
-    Set SEARCH_BACKEND to force a specific backend:
-    - "searxng", "tavily", "brave", "duckduckgo"
-    """
-    forced_backend = os.environ.get("SEARCH_BACKEND", "").lower()
-    
-    if forced_backend == "searxng" or (not forced_backend and os.environ.get("SEARXNG_URL")):
-        return SearXNGBackend()
-    
-    if forced_backend == "tavily" or (not forced_backend and os.environ.get("TAVILY_API_KEY")):
-        return TavilyBackend()
-    
-    if forced_backend == "brave" or (not forced_backend and os.environ.get("BRAVE_API_KEY")):
-        return BraveBackend()
-    
-    # Fallback to DuckDuckGo
-    logger.warning(
-        "Using DuckDuckGo as search backend (may have rate limits). "
-        "Consider setting up SearXNG, Tavily, or Brave for better results."
-    )
-    return DuckDuckGoBackend()
-
-
-# Cache the backend instance
-_search_backend: Optional[SearchBackend] = None
-
-def _get_backend() -> SearchBackend:
-    global _search_backend
-    if _search_backend is None:
-        _search_backend = get_search_backend()
-    return _search_backend
-
-
-# =============================================================================
-# Tools
-# =============================================================================
+    return href
 
 class ReadWebsite(Tool):
     """
@@ -358,10 +53,7 @@ class ReadWebsite(Tool):
 
     def run(self, agent):
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
-            response = requests.get(self.url, headers=headers, timeout=10)
+            response = requests.get(self.url, headers=_HEADERS, timeout=10)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, "html.parser")
                 
@@ -402,21 +94,42 @@ class SearchWeb(Tool):
 
     def run(self, agent):
         try:
-            backend = _get_backend()
-            results = backend.search(
-                self.query,
-                max_results=min(max(1, self.max_results), 25)
+            # POST to DuckDuckGo HTML search
+            response = requests.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": self.query},
+                headers=_HEADERS,
+                timeout=10
             )
             
-            if not results:
-                return f"No results found for '{self.query}'"
+            if response.status_code != 200:
+                return f"Search failed: HTTP {response.status_code}"
             
+            soup = BeautifulSoup(response.content, "html.parser")
+            
+            # Find all result elements
+            results = soup.select(".result")
             formatted_results = []
-            for i, result in enumerate(results, 1):
-                formatted_results.append({
-                    "rank": i,
-                    **result
-                })
+            
+            for result in results[:self.max_results]:
+                # Extract title and URL from the result link
+                title_elem = result.select_one(".result__a")
+                snippet_elem = result.select_one(".result__snippet")
+                
+                if not title_elem:
+                    continue
+                
+                title = title_elem.get_text(strip=True)
+                href = title_elem.get("href", "")
+                url = _extract_ddg_url(href)
+                snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                
+                if title and url:
+                    formatted_results.append({
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet
+                    })
             
             return {
                 "query": self.query,
@@ -424,6 +137,8 @@ class SearchWeb(Tool):
                 "results": formatted_results
             }
             
+        except requests.exceptions.Timeout:
+            return f"Error: Search request timed out"
         except Exception as e:
             logger.error(f"Search error: {e}")
             return f"Error performing search: {str(e)}"
@@ -445,21 +160,42 @@ class SearchNews(Tool):
 
     def run(self, agent):
         try:
-            backend = _get_backend()
-            results = backend.search_news(
-                self.query,
-                max_results=min(max(1, self.max_results), 25)
+            # POST to DuckDuckGo HTML search with news filter
+            response = requests.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": self.query, "iar": "news"},
+                headers=_HEADERS,
+                timeout=10
             )
             
-            if not results:
-                return f"No news found for '{self.query}'"
+            if response.status_code != 200:
+                return f"News search failed: HTTP {response.status_code}"
             
+            soup = BeautifulSoup(response.content, "html.parser")
+            
+            # Find all result elements
+            results = soup.select(".result")
             formatted_results = []
-            for i, result in enumerate(results, 1):
-                formatted_results.append({
-                    "rank": i,
-                    **result
-                })
+            
+            for result in results[:self.max_results]:
+                # Extract title and URL from the result link
+                title_elem = result.select_one(".result__a")
+                snippet_elem = result.select_one(".result__snippet")
+                
+                if not title_elem:
+                    continue
+                
+                title = title_elem.get_text(strip=True)
+                href = title_elem.get("href", "")
+                url = _extract_ddg_url(href)
+                snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                
+                if title and url:
+                    formatted_results.append({
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet
+                    })
             
             return {
                 "query": self.query,
@@ -467,6 +203,8 @@ class SearchNews(Tool):
                 "results": formatted_results
             }
             
+        except requests.exceptions.Timeout:
+            return f"Error: News search request timed out"
         except Exception as e:
             logger.error(f"News search error: {e}")
             return f"Error performing news search: {str(e)}"

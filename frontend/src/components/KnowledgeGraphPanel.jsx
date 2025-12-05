@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { socket } from '../lib/socket';
 import { Database, Box, Share2, Trash, X } from 'lucide-react';
 
-export default function KnowledgeGraphPanel({ selectedAgentId }) {
+export default function KnowledgeGraphPanel() {
   const [entities, setEntities] = useState([]);
   const [relationships, setRelationships] = useState([]);
   const [selectedEntityName, setSelectedEntityName] = useState(null);
@@ -16,24 +16,9 @@ export default function KnowledgeGraphPanel({ selectedAgentId }) {
   // Helper to create relationship key
   const relKey = (r) => `${r.from}-${r.type}-${r.to}`;
 
-  // Clear display and request KG when selected agent changes
   useEffect(() => {
-    setEntities([]);
-    setRelationships([]);
-    setSelectedEntityName(null);
-    setSelectedRelationshipKey(null);
-    
-    if (selectedAgentId) {
-      socket.emit('get_knowledge_graph', { id: selectedAgentId });
-    }
-  }, [selectedAgentId]);
-
-  useEffect(() => {
-    // Listen for full knowledge graph state (when agent loads)
+    // Listen for full knowledge graph state
     function onKnowledgeGraphState(data) {
-      // Only update if it's for the selected agent
-      if (data.agentId !== selectedAgentId) return;
-      
       if (data.entities && data.relationships) {
         setEntities(data.entities);
         setRelationships(data.relationships);
@@ -44,12 +29,10 @@ export default function KnowledgeGraphPanel({ selectedAgentId }) {
     socket.on('knowledge_graph_state', onKnowledgeGraphState);
     
     return () => socket.off('knowledge_graph_state', onKnowledgeGraphState);
-  }, [selectedAgentId]);
+  }, []);
 
   useEffect(() => {
     function onAgentEvent(event) {
-      // Only process events for the selected agent
-      if (event.agentId !== selectedAgentId) return;
       
       if (event.type === 'tool.selected') {
         const { tool_name, arguments: args } = event.data;
@@ -170,7 +153,7 @@ export default function KnowledgeGraphPanel({ selectedAgentId }) {
     }
     socket.on('agent_event', onAgentEvent);
     return () => socket.off('agent_event', onAgentEvent);
-  }, [selectedAgentId, selectedEntityName, selectedRelationshipKey]);
+  }, [selectedEntityName, selectedRelationshipKey]);
 
   const handleRelationshipClick = (r) => {
     const key = relKey(r);

@@ -21,9 +21,17 @@ wikipedia>=1.4.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 duckduckgo-search>=4.0.0
+ipython>=8.0.0
 
 # Templates
 jinja2>=3.1.0
 
 # Logging
 loguru>=0.7.0
+
+# Voice / STT
+faster-whisper>=1.0.0
+webrtcvad>=2.0.10
+
+# Voice / TTS
+piper-tts>=1.2.0
