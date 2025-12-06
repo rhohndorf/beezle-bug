@@ -63,9 +63,6 @@ template_loader = TemplateLoader(DATA_DIR)
 # TTS State
 tts_enabled = False
 tts_instance: PiperTTS = None
-AUDIO_DIR = DATA_DIR / "audio"
-AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-
 
 
 def event_handler(event):
