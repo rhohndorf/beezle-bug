@@ -6,10 +6,28 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 from pydantic import BaseModel, Field, model_validator
 
-from beezle_bug.agent_graph.types import TTSSettings
 from beezle_bug.agent_graph.agent_graph import AgentGraph
+
+
+class TTSSettings(BaseModel):
+    """TTS (voice output) settings for a project."""
+    enabled: bool = False
+    voice: Optional[str] = None
+    speed: float = 1.0
+    speaker: int = 0
+
+
+class STTSettings(BaseModel):
+    """STT (voice input) settings for a project."""
+    enabled: bool = False
+    device_id: Optional[str] = None
+    device_label: Optional[str] = None
+    wake_words: List[str] = Field(default_factory=lambda: ["hey beezle", "ok beezle"])
+    stop_words: List[str] = Field(default_factory=lambda: ["stop listening", "goodbye", "that's all"])
+    max_duration: float = 30.0  # Maximum recording duration in seconds
 
 
 class Project(BaseModel):
@@ -18,6 +36,7 @@ class Project(BaseModel):
     name: str
     agent_graph: AgentGraph = Field(default_factory=AgentGraph)
     tts_settings: TTSSettings = Field(default_factory=TTSSettings)
+    stt_settings: STTSettings = Field(default_factory=STTSettings)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

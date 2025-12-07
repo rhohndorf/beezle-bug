@@ -1,51 +1,342 @@
-![GitHub Image](imgs/banner.jpeg)
+![Beezle Bug Banner](imgs/banner.jpeg)
+
 # Beezle Bug
-In the [Otherland](https://en.wikipedia.org/wiki/Otherland) series of cyberpunk novels Beezle Bug is the virtual assistant of Orlando Gardiner, one of the main characters.
-Originally a kids' toy, it was upgraded many times until it's almost as sentient as a real person.
-Beezle Bug has two different forms of appearance. In the virtual world it appears as a creature with many arms and legs. It can also download itself into a spider-like toy robot in the physical world.
 
+> *A visual agent graph builder inspired by the AI companion from Tad Williams' [Otherland](https://en.wikipedia.org/wiki/Otherland) series*
 
-## Vision and Goals
-Like its fictional counterpart our Beezle Bug agent starts as a limited toy project and will hopefully grow into a useful tool over time.
-Beezle is running completely locally and requires a running llama.cpp server. 
+**Beezle Bug** is a local-first, visual tool for building and orchestrating AI agent systems. Design multi-agent workflows with a node-based editor, connect agents to knowledge graphs and memory streams, and deploy them instantly—all from a modern dark-themed interface.
 
-With Beezle Bug we want to explore agentive behaviours like
-* Autonomy
-* Open-Endedness
-* Cooperation
-* Self Improvement
+## 🎯 Features
 
-### Autonomy
-Beezle Bug is an autonomous and proactive agent.
+- **Visual Node Graph Editor** – Drag-and-drop interface for building agent pipelines
+- **Multi-Agent Orchestration** – Create and connect multiple specialized agents
+- **Knowledge Graphs** – Persistent entity-relationship storage for agent memory
+- **Memory Streams** – Observation-based short-term memory for agents
+- **Template System** – Jinja2 templates for agent system prompts
+- **Scheduled Events** – Timer-based autonomous agent triggering
+- **Text-to-Speech** – Integrated Piper TTS with voice selection
+- **Voice Input** – Wake word-activated speech-to-text with Whisper
+- **Real-time Introspection** – Watch agent reasoning in real-time
+- **Fully Local or Cloud** – Run entirely on your machine with local LLMs, or connect to remote APIs via LiteLLM
 
-What's working ?
-- [x] Run continuously every n seconds
-- [x] [Tool Use](docs/tools.md)
-- [x] [Memory Management](docs/memory_management.md)
-- [ ] Planning
+---
 
-### Cooperation
-To be able to work on several things at the same time without confusing itself, Beezle Bug can clone itself and give its clone specific instructions.
+## 📸 Interface Overview
 
-What's working ?
-- [ ] Create/start/stop/destroy a clone of itself
-- [ ] Delegate tasks to clone
-- [ ] Specialize the clone for specific tasks
+Beezle Bug features a three-column layout with resizable panels:
 
+### Main Interface
 
-### Self Improvement
+![Main Interface](imgs/screenshots/main_interface.png)
+*The full Beezle Bug interface showing all panels*
 
-What's working ?
+---
 
-- [ ] Create new compound tools
-- [ ] Create new primitive tools
-- [ ] Fine tune self on collected data
+### 1. Menu Bar
 
-## Examples
+![Menu Bar](imgs/screenshots/menubar.png)
 
-#### Web Chat
-There is a web chat example [here](examples/webchat/README.md).
-The example in the image below uses Gemma2-9B. It shows nicely how the agent can execute multiple actions without having to be prompted each time.
-![Counting to ten](imgs/webchat_countdown.png)
-This is pretty solid for such a small model.
-![Help writing an essay on womens voting rights](imgs/webchat_voting-rights.png)
+The top menu bar provides:
+- **Project Selector** – Create, load, and switch between projects
+- **Save/Delete** – Quick actions for project management
+- **Deploy/Stop** – One-click deployment of your agent graph
+
+---
+
+### 2. Neural Stream (Left Panel - Top)
+
+![Neural Stream](imgs/screenshots/neural_stream.png)
+
+Real-time introspection of agent activity:
+- **Message events** – When agents receive input
+- **Thinking** – LLM reasoning in progress
+- **Tool calls** – Tools being selected and executed
+- **Filtering** – Filter by agent or event type
+- **Expandable events** – Click to see full details
+
+---
+
+### 3. Log Panel (Left Panel - Bottom)
+
+![Log Panel](imgs/screenshots/log_panel.png)
+
+System logs with color-coded entries:
+- ✅ Success messages (green)
+- ℹ️ Info messages (blue)
+- ⚠️ Warnings (yellow)
+- ❌ Errors (red)
+
+---
+
+### 4. Chat Tab (Center Panel)
+
+![Chat Interface](imgs/screenshots/chat.png)
+
+Conversation interface with deployed agents:
+- **Markdown support** – Code blocks, lists, links
+- **Audio playback** – TTS-generated responses
+- **Voice input indicator** – Shows listening state (idle/active)
+- **User input** – Send messages via text or voice
+
+---
+
+### 5. Node Graph Tab (Center Panel)
+
+![Node Graph](imgs/screenshots/node_graph.png)
+
+Visual editor for building agent pipelines:
+
+| Node Type | Description |
+|-----------|-------------|
+| 🤖 **Agent** | LLM-powered agent with configurable model and template |
+| 🧠 **Knowledge Graph** | Persistent entity-relationship storage |
+| 💾 **Memory Stream** | Observation-based memory buffer |
+| 🔧 **Toolbox** | Collection of tools an agent can use |
+| 💬 **User Chat** | Input from the user interface |
+| 🖥️ **User Display** | Output to the chat interface |
+| ⏰ **Scheduled Event** | Timer trigger for autonomous operation |
+
+**Connection Types:**
+- **Message** (blue) – Agent-to-agent communication
+- **Trigger** (yellow) – Event triggering
+- **Pipeline** (green) – Data flow
+- **Resource** (purple, dashed) – Shared resources
+- **Delegate** (orange, dashed) – Task delegation
+
+---
+
+### 6. Template Editor Tab (Center Panel)
+
+![Template Editor](imgs/screenshots/template_editor.png)
+
+Edit and manage Jinja2 templates for agent system prompts:
+- **Template list** – All available templates
+- **Syntax highlighting** – Jinja2 + Markdown
+- **Create/Save/Delete** – Full template management
+- **Unsaved changes indicator** – Visual feedback
+
+Built-in templates include:
+- `agent.j2` – General-purpose agent
+- `researcher.j2` – Research-focused agent
+- `planner.j2` – Task planning agent
+- `python_programmer.j2` – Code-focused agent
+- `summarizer.j2` – Text summarization
+- And more...
+
+---
+
+### 7. Settings Panel (Right Panel - Top)
+
+![Settings Panel](imgs/screenshots/settings_panel.png)
+
+Tabbed configuration interface:
+
+#### Agents Tab
+View and manage running agent instances.
+
+#### Node Inspector Tab
+![Node Inspector](imgs/screenshots/node_inspector.png)
+
+Configure the selected node's properties:
+- Agent: Model, API URL, system template
+- Knowledge Graph: Name
+- Memory Stream: Max observations
+- Toolbox: Available tools
+- Scheduled Event: Trigger type and interval
+
+#### Schedule Tab
+View and manage scheduled events.
+
+#### Voice Tab
+![Voice Settings](imgs/screenshots/voice_settings.png)
+
+**Voice Input (Speech-to-Text):**
+- **Continuous Listening** – Enable/disable wake word detection
+- **Microphone Selection** – Choose input device
+- **Wake Words** – Configurable phrases to activate voice input (e.g., "Hey Beezle")
+- **Stop Words** – Phrases to deactivate voice input (e.g., "Stop listening")
+- **Max Recording Duration** – Adjustable buffer size (5–60 seconds) for longer utterances
+
+When enabled, the system listens continuously for wake words. Once detected, all subsequent speech is transcribed and sent to agents until a stop word is spoken. The max recording duration slider controls how much audio can be buffered before it's processed—increase this if your speech is being cut off.
+
+**Voice Output (Text-to-Speech):**
+- Enable/disable TTS
+- Voice selection (150+ Piper voices)
+- Speed adjustment (0.5x - 2.0x)
+- Speaker selection (for multi-speaker voices)
+
+---
+
+### 8. Knowledge Graph View (in Node Inspector)
+
+When a Knowledge Graph node is selected, the Node Inspector displays:
+- **Entities** – Named objects with types and properties
+- **Relationships** – Connections between entities
+- **Real-time updates** – Watch the graph grow as agents learn
+- **Selection details** – Click to view entity/relationship properties
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Docker & Docker Compose
+- An LLM server (OpenAI-compatible API or local llama.cpp)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/beezle-bug.git
+cd beezle-bug
+
+# Start the services
+docker compose up -d
+
+# Frontend available at http://localhost:5173
+# Backend API at http://localhost:5000
+```
+
+### First Agent Graph
+
+1. **Create a Project** – Click the folder icon → "New Project"
+2. **Add Nodes** – Click "+" in the Node Graph tab
+   - Add an **Agent** node
+   - Add a **User Chat** node
+   - Add a **User Display** node
+3. **Connect Nodes** – Drag from output ports to input ports
+   - User Chat → Agent (trigger)
+   - Agent → User Display (message)
+4. **Configure Agent** – Select the agent node and configure:
+   - API URL: Your LLM endpoint (e.g., `http://127.0.0.1:1234/v1`)
+   - Model: Your model name
+   - Template: Choose a system template
+5. **Deploy** – Click the green "Deploy" button
+6. **Chat** – Switch to the Chat tab and start talking!
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend (React)                      │
+│   NodeGraph │ Chat │ Templates │ Settings │ KnowledgeGraph  │
+└────────────────────────────┬────────────────────────────────┘
+                             │ Socket.IO
+┌────────────────────────────┴────────────────────────────────┐
+│                      Backend (Flask)                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ ProjectMgr   │  │   Runtime    │  │   Storage    │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│         │                 │                  │               │
+│  ┌──────┴─────────────────┴──────────────────┴─────┐        │
+│  │              Agent Graph Engine                  │        │
+│  │  Agents │ KnowledgeGraph │ MemoryStream │ Tools │        │
+│  └─────────────────────────────────────────────────┘        │
+└─────────────────────────────────────────────────────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+         ┌────────┐    ┌─────────┐    ┌─────────┐
+         │Local   │    │ OpenAI  │    │ LiteLLM │
+         │llama   │    │   API   │    │         │
+         └────────┘    └─────────┘    └─────────┘
+```
+
+---
+
+## 📁 Project Structure
+
+```
+beezle-bug/
+├── backend/
+│   ├── beezle_bug/
+│   │   ├── agent_graph/      # Agent graph models and runtime
+│   │   ├── llm_adapter/      # LLM provider adapters
+│   │   ├── memory/           # Knowledge graph & memory stream
+│   │   ├── tools/            # Agent tools
+│   │   └── voice/            # TTS (Piper) and STT (Whisper)
+│   └── server.py             # Flask + SocketIO server
+├── frontend/
+│   └── src/
+│       ├── components/       # React components
+│       └── App.jsx           # Main application
+├── data/
+│   ├── projects/             # Saved projects
+│   ├── templates/            # Jinja2 system templates
+│   └── voices/               # Piper TTS voice models
+└── docker-compose.yml
+```
+
+---
+
+## 🛠️ Available Tools
+
+Agents can use these built-in tools:
+
+| Category | Tools |
+|----------|-------|
+| **Knowledge Graph** | AddEntity, AddRelationship, AddPropertyToEntity, QueryEntities, QueryRelationships |
+| **Memory** | AddObservation, RecallObservations, GetRecentObservations |
+| **Web** | SearchWeb, SearchNews, ReadWebsite |
+| **Filesystem** | ReadFile, WriteFile, ListDirectory |
+| **System** | ExecuteCommand, RunPython |
+| **Messaging** | SendAgentMessage |
+
+---
+
+## 🔮 Vision & Roadmap
+
+Inspired by the AI companion from Otherland, Beezle Bug aims to explore:
+
+### Autonomy ✅
+- [x] Continuous autonomous operation
+- [x] Tool use and execution
+- [x] Memory management
+- [ ] Advanced planning
+
+### Cooperation 🚧
+- [ ] Multi-agent task delegation
+- [ ] Agent specialization
+- [x] Inter-agent messaging
+
+### Self-Improvement 🔮
+- [ ] Dynamic tool creation
+- [ ] Self-fine-tuning
+- [ ] Capability expansion
+
+---
+
+## 📖 Documentation
+
+- [Getting Started](docs/getting_started.md)
+- [Architecture Overview](docs/architecture.md)
+- [Agent System](docs/agents.md)
+- [Tools Reference](docs/tools.md)
+- [Memory Management](docs/memory_management.md)
+- [LLM Adapters](docs/llm_adapters.md)
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- Tad Williams for the [Otherland](https://en.wikipedia.org/wiki/Otherland) series
+- [Piper TTS](https://github.com/rhasspy/piper) for local text-to-speech
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for speech recognition
+- [React Flow](https://reactflow.dev/) inspiration for the node graph
+- The open-source AI community
+
+---
+
+<p align="center">
+  <i>"Originally a kids' toy, it was upgraded many times until it's almost as sentient as a real person."</i><br>
+  — Otherland, on Beezle Bug
+</p>

@@ -19,8 +19,8 @@ class Node(BaseModel):
         """Get available ports for this node type."""
         if self.type == NodeType.AGENT:
             return {
-                "inputs": ["message_in", "trigger_in", "answer"],
-                "outputs": ["message_out", "trigger_out", "ask"],
+                "inputs": ["message_in", "answer"],
+                "outputs": ["message_out", "ask"],
                 "bidirectional": ["knowledge", "memory", "tools"],
             }
         elif self.type == NodeType.KNOWLEDGE_GRAPH:
@@ -56,7 +56,7 @@ class Node(BaseModel):
         elif self.type == NodeType.SCHEDULED_EVENT:
             return {
                 "inputs": [],
-                "outputs": ["trigger_out"],
+                "outputs": ["message_out"],
                 "bidirectional": [],
             }
         return {"inputs": [], "outputs": [], "bidirectional": []}

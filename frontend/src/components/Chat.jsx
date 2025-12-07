@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../lib/socket';
-import { Send, Terminal, Volume2, Square } from 'lucide-react';
+import { Send, Terminal, Volume2, Square, Mic, MicOff } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -110,16 +110,179 @@ const MarkdownComponents = {
   },
 };
 
-export default function Chat({ agentStatus, messages, setMessages }) {
+export default function Chat({ agentStatus, messages, setMessages, isDeployed = false }) {
   const [input, setInput] = useState('');
   const [playingMessageId, setPlayingMessageId] = useState(null);
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
   const lastMessageCountRef = useRef(0);
+  
+  // Voice input state
+  const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'active'
+  const [sttEnabled, setSttEnabled] = useState(false);
+  const [sttSettings, setSttSettings] = useState(null);
+  const mediaRecorderRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const streamRef = useRef(null);
+  const processorRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+  
+  // Get STT settings and listen for changes
+  useEffect(() => {
+    const handleSttSettings = (data) => {
+      setSttSettings(data);
+      setSttEnabled(data.enabled);
+    };
+    
+    const handleVoiceStateChange = (data) => {
+      setVoiceState(data.state);
+    };
+    
+    // Handle STT status updates from backend
+    const handleSttStatus = (data) => {
+      if (data.state === 'active') {
+        setVoiceState('active');
+      } else if (data.state === 'idle') {
+        setVoiceState('listening');
+      }
+    };
+    
+    // Handle when wake word is detected
+    const handleSttActivated = () => {
+      setVoiceState('active');
+    };
+    
+    // Handle when stop word is detected
+    const handleSttDeactivated = () => {
+      setVoiceState('listening');
+    };
+    
+    socket.on('stt_settings', handleSttSettings);
+    socket.on('voice_state_change', handleVoiceStateChange);
+    socket.on('stt_status', handleSttStatus);
+    socket.on('stt_activated', handleSttActivated);
+    socket.on('stt_deactivated', handleSttDeactivated);
+    socket.emit('get_stt_settings');
+    
+    return () => {
+      socket.off('stt_settings', handleSttSettings);
+      socket.off('voice_state_change', handleVoiceStateChange);
+      socket.off('stt_status', handleSttStatus);
+      socket.off('stt_activated', handleSttActivated);
+      socket.off('stt_deactivated', handleSttDeactivated);
+    };
+  }, []);
+  
+  // Start/stop audio capture based on sttEnabled and deployment state
+  useEffect(() => {
+    if (sttEnabled && sttSettings && isDeployed) {
+      startAudioCapture();
+    } else {
+      stopAudioCapture();
+    }
+    
+    return () => {
+      stopAudioCapture();
+    };
+  }, [sttEnabled, sttSettings, isDeployed]);
+  
+  const startAudioCapture = useCallback(async () => {
+    try {
+      const constraints = {
+        audio: sttSettings?.device_id 
+          ? { deviceId: { exact: sttSettings.device_id } }
+          : true
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      
+      // Create audio context for processing
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      
+      // Create script processor for raw PCM capture
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+      
+      // Use stt_stream_start for continuous wake word mode
+      socket.emit('stt_stream_start');
+      setVoiceState('listening');
+      
+      // Simple energy-based speech detection
+      let silenceFrames = 0;
+      const SILENCE_THRESHOLD = 0.01;
+      const SILENCE_FRAMES_TO_STOP = 8; // ~0.5s at 4096 samples/frame
+      
+      processor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        
+        // Calculate RMS energy for simple VAD
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          sum += inputData[i] * inputData[i];
+        }
+        const rms = Math.sqrt(sum / inputData.length);
+        const isSpeech = rms > SILENCE_THRESHOLD;
+        
+        if (isSpeech) {
+          silenceFrames = 0;
+        } else {
+          silenceFrames++;
+        }
+        
+        // Convert Float32Array to Int16Array
+        const int16Data = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        // Convert to base64
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(int16Data.buffer)));
+        
+        // Send chunk with speech detection info
+        socket.emit('stt_stream_chunk', { 
+          audio: base64, 
+          speech: isSpeech || silenceFrames < SILENCE_FRAMES_TO_STOP 
+        });
+      };
+      
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      
+    } catch (err) {
+      console.error('Failed to start audio capture:', err);
+      setSttEnabled(false);
+    }
+  }, [sttSettings]);
+  
+  const stopAudioCapture = useCallback(() => {
+    const wasCapturing = processorRef.current != null;
+    
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    
+    // Only emit stt_stream_stop if we were actually capturing
+    if (wasCapturing) {
+      socket.emit('stt_stream_stop');
+    }
+    setVoiceState('idle');
+  }, []);
 
   // Auto-play audio for new messages
   useEffect(() => {
@@ -204,11 +367,46 @@ export default function Chat({ agentStatus, messages, setMessages }) {
 
   return (
     <div className="flex flex-col h-full bg-[#0c0c0c]">
-      <div className="h-10 border-b border-[#2b2b2b] flex items-center px-4">
+      <div className="h-10 border-b border-[#2b2b2b] flex items-center justify-between px-4">
         <span className="text-[#888888] text-xs uppercase tracking-wide font-medium flex items-center gap-2">
           <Terminal size={14} />
           Chat
         </span>
+        
+        {/* Voice Input Status */}
+        {sttEnabled && (
+          <div className={`flex items-center gap-2 text-[10px] px-2 py-1 rounded ${
+            !isDeployed
+              ? 'bg-[#333] text-[#666]'
+              : voiceState === 'active' 
+                ? 'bg-[#22c55e]/20 text-[#22c55e]' 
+                : voiceState === 'listening'
+                  ? 'bg-[#f59e0b]/20 text-[#f59e0b]'
+                  : 'bg-[#333] text-[#888]'
+          }`}>
+            {!isDeployed ? (
+              <>
+                <MicOff size={12} />
+                <span>Deploy to enable voice</span>
+              </>
+            ) : voiceState === 'active' ? (
+              <>
+                <Mic size={12} className="animate-pulse" />
+                <span>ACTIVE - Sending</span>
+              </>
+            ) : voiceState === 'listening' ? (
+              <>
+                <Mic size={12} />
+                <span>Listening for wake word...</span>
+              </>
+            ) : (
+              <>
+                <MicOff size={12} />
+                <span>Voice Off</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 text-sm">

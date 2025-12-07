@@ -22,8 +22,7 @@ class NodeType(str, Enum):
 
 class EdgeType(str, Enum):
     """Types of edges/connections between nodes."""
-    MESSAGE = "message"      # Direct message passing between agents
-    TRIGGER = "trigger"      # Signals agent to wake up and process
+    MESSAGE = "message"      # Direct message passing between agents or event nodes
     PIPELINE = "pipeline"    # Output becomes input (chained processing)
     RESOURCE = "resource"    # Bidirectional read/write access to KG/Memory
     DELEGATE = "delegate"    # Sync call: agent A asks agent B, gets response as tool result
@@ -79,14 +78,7 @@ class ScheduledEventNodeConfig(BaseModel):
     trigger_type: str = "interval"  # "once" or "interval"
     run_at: Optional[str] = None    # ISO datetime for "once"
     interval_seconds: int = 30       # For "interval"
-
-
-class TTSSettings(BaseModel):
-    """TTS settings for a project."""
-    enabled: bool = False
-    voice: Optional[str] = None
-    speed: float = 1.0
-    speaker: int = 0
+    message_content: str = "Review your current state and pending tasks."
 
 
 # Union type for all node configs

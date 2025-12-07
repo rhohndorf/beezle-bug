@@ -3,7 +3,7 @@ import { Bot, Calendar, Box, Volume2 } from 'lucide-react';
 import AgentControlTab from './AgentControlTab';
 import ScheduleTab from './ScheduleTab';
 import NodeInspectorTab from './NodeInspectorTab';
-import TTSSettingsTab from './TTSSettingsTab';
+import VoiceSettingsTab from './VoiceSettingsTab';
 
 export default function SettingsPanel({ selectedAgentGraphNode, isAgentGraphDeployed }) {
   const [activeTab, setActiveTab] = useState('agents');
@@ -70,7 +70,7 @@ export default function SettingsPanel({ selectedAgentGraphNode, isAgentGraphDepl
         {activeTab === 'agents' && <AgentControlTab />}
         {activeTab === 'node' && <NodeInspectorTab selectedNode={selectedAgentGraphNode} isDeployed={isAgentGraphDeployed} />}
         {activeTab === 'schedule' && <ScheduleTab />}
-        {activeTab === 'voice' && <TTSSettingsTab />}
+        {activeTab === 'voice' && <VoiceSettingsTab isDeployed={isAgentGraphDeployed} />}
       </div>
     </div>
   );

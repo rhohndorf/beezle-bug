@@ -5,7 +5,6 @@ import NodeGraph from './components/NodeGraph';
 import TemplateEditorTab from './components/TemplateEditorTab';
 import IntrospectionPanel from './components/IntrospectionPanel';
 import SettingsPanel from './components/SettingsPanel';
-import KnowledgeGraphPanel from './components/KnowledgeGraphPanel';
 import LogPanel from './components/LogPanel';
 import ProjectMenuBar from './components/ProjectMenuBar';
 import { Activity, MessageSquare, GitBranch, FileText } from 'lucide-react';
@@ -31,11 +30,9 @@ function App() {
   const [leftWidth, setLeftWidth] = useState(550);
   const [rightWidth, setRightWidth] = useState(window.innerWidth * 0.2); // 1/5 of window width
   const [topHeight, setTopHeight] = useState(window.innerHeight * 0.5); // IntrospectionPanel ~50%
-  const [rightTopHeight, setRightTopHeight] = useState(window.innerHeight * 0.33); // Settings panel ~2/3, LogPanel ~1/3
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
   const [isResizingVertical, setIsResizingVertical] = useState(false);
-  const [isResizingRightVertical, setIsResizingRightVertical] = useState(false);
 
   useEffect(() => {
     function onConnect() { setIsConnected(true); }
@@ -110,30 +107,25 @@ function App() {
       if (isResizingLeft) setLeftWidth(Math.min(Math.max(300, e.clientX), 800));
       if (isResizingRight) setRightWidth(Math.min(Math.max(300, window.innerWidth - e.clientX), 600));
       if (isResizingVertical) setTopHeight(Math.min(Math.max(150, e.clientY - 36), window.innerHeight - 236)); // Account for menu bar
-      if (isResizingRightVertical) {
-        const relativeY = e.clientY - 36; // Account for menu bar
-        setRightTopHeight(Math.min(Math.max(200, relativeY), window.innerHeight - 186));
-      }
     };
     const handleMouseUp = () => {
       setIsResizingLeft(false);
       setIsResizingRight(false);
       setIsResizingVertical(false);
-      setIsResizingRightVertical(false);
       document.body.style.cursor = 'default';
       document.body.style.userSelect = 'auto';
     };
-    if (isResizingLeft || isResizingRight || isResizingVertical || isResizingRightVertical) {
+    if (isResizingLeft || isResizingRight || isResizingVertical) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = (isResizingVertical || isResizingRightVertical) ? 'row-resize' : 'col-resize';
+      document.body.style.cursor = isResizingVertical ? 'row-resize' : 'col-resize';
       document.body.style.userSelect = 'none';
     }
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingLeft, isResizingRight, isResizingVertical, isResizingRightVertical, rightWidth]);
+  }, [isResizingLeft, isResizingRight, isResizingVertical, rightWidth]);
 
   const tabs = [
     { id: 'chat', label: 'Chat', icon: MessageSquare },
@@ -213,36 +205,25 @@ function App() {
 
           {/* Tab Content */}
           <div className="flex-1 overflow-hidden">
-            {activeTab === 'chat' && <Chat agentStatus={agentStatus} messages={chatMessages} setMessages={setChatMessages} />}
+            {activeTab === 'chat' && <Chat agentStatus={agentStatus} messages={chatMessages} setMessages={setChatMessages} isDeployed={isAgentGraphDeployed} />}
             {activeTab === 'nodes' && <NodeGraph onSelectNode={setSelectedAgentGraphNode} />}
             {activeTab === 'templates' && <TemplateEditorTab />}
           </div>
         </div>
 
-        {/* Right: Settings + Knowledge Graph */}
+        {/* Right: Settings Panel */}
         <div style={{ width: rightWidth }} className="flex-shrink-0 border-l border-[#2b2b2b] relative flex flex-col">
           <div 
             className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-[#3b82f6] transition-colors z-50 opacity-0 hover:opacity-100"
             onMouseDown={() => setIsResizingRight(true)}
           />
           
-          {/* Settings Panel */}
-          <div style={{ height: rightTopHeight }} className="flex-shrink-0 overflow-hidden">
+          {/* Settings Panel - Full Height */}
+          <div className="flex-1 overflow-hidden">
             <SettingsPanel 
               selectedAgentGraphNode={selectedAgentGraphNode}
               isAgentGraphDeployed={isAgentGraphDeployed}
             />
-          </div>
-          
-          {/* Vertical Resizer */}
-          <div 
-            className="h-1 bg-[#2b2b2b] cursor-row-resize hover:bg-[#3b82f6] transition-colors flex-shrink-0"
-            onMouseDown={() => setIsResizingRightVertical(true)}
-          />
-          
-          {/* Knowledge Graph */}
-          <div className="flex-1 min-h-[100px] overflow-hidden">
-            <KnowledgeGraphPanel />
           </div>
         </div>
       </div>

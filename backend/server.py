@@ -15,7 +15,7 @@ eventlet.monkey_patch()
 import os
 from loguru import logger
 from pathlib import Path
-from flask import Flask, render_template, send_from_directory, abort
+from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 
@@ -40,8 +40,8 @@ from beezle_bug.agent_graph import (
     UserInputNodeConfig,
     UserOutputNodeConfig,
     ScheduledEventNodeConfig,
-    TTSSettings,
 )
+from beezle_bug.project import TTSSettings, STTSettings
 from beezle_bug.voice.tts import PiperTTS, get_tts, PIPER_AVAILABLE
 
 import base64
@@ -169,15 +169,6 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/audio/<filename>")
-def serve_audio(filename):
-    """Serve generated TTS audio files."""
-    audio_path = AUDIO_DIR / filename
-    if not audio_path.exists():
-        abort(404)
-    return send_from_directory(AUDIO_DIR, filename, mimetype="audio/wav")
-
-
 # ==================== WebSocket Handlers ====================
 
 @socketio.on("connect")
@@ -280,7 +271,7 @@ def handle_delete_template(data):
 def handle_message(data):
     """Handle chat messages from users."""
     logger.info(f"Message: {data}")
-    emit("chat_message", data, broadcast=True)
+    emit("chat_message", data)
     
     user = data.get("user", "User")
     message = data.get("message", "")
@@ -500,6 +491,31 @@ def handle_get_agent_graph_state():
     emit("agent_graph_agents", runtime.get_running_agents())
 
 
+@socketio.on("get_node_kg_data")
+def handle_get_node_kg_data(data):
+    """Get knowledge graph data for a specific node."""
+    node_id = data.get("node_id")
+    if not node_id or not runtime._current_project_id:
+        return
+    
+    kg = runtime.knowledge_graphs.get(node_id)
+    if kg:
+        kg_dict = kg.to_dict()
+        # Transform to frontend format
+        entities = [
+            {"name": name, "type": props.get("type", "Entity"), "properties": {k: v for k, v in props.items() if k != "type"}}
+            for name, props in kg_dict.get("entities", {}).items()
+        ]
+        relationships = [
+            {"from": r["entity1"], "to": r["entity2"], "type": r.get("type", ""), "properties": {k: v for k, v in r.items() if k not in ("entity1", "entity2", "type")}}
+            for r in kg_dict.get("relationships", [])
+        ]
+        emit("node_kg_data", {"node_id": node_id, "entities": entities, "relationships": relationships})
+    else:
+        # Return empty data if KG doesn't exist yet (not deployed)
+        emit("node_kg_data", {"node_id": node_id, "entities": [], "relationships": []})
+
+
 @socketio.on("add_node")
 def handle_add_node(data):
     """Add a node to the agent graph."""
@@ -660,7 +676,7 @@ def handle_agent_graph_user_message(data):
         "user": user,
         "message": content,
         "source": "agent_graph"
-    }, broadcast=True)
+    })
     
     def process():
         responses = runtime.send_user_message(content, user)
@@ -846,7 +862,7 @@ def get_transcriber():
     global _transcriber
     if _transcriber is None:
         from beezle_bug.voice import Transcriber
-        _transcriber = Transcriber(model_size="base", device="cuda", compute_type="float16")
+        _transcriber = Transcriber(model_size="small", device="cpu")
     return _transcriber
 
 
@@ -923,7 +939,7 @@ def handle_audio_end(data=None):
                     "user": "User",
                     "message": text,
                     "source": "voice"
-                }, broadcast=True)
+                })
                 
                 # Process with agent graph or agents
                 if project_manager.current_project and runtime.agents:
@@ -964,6 +980,248 @@ def _add_wav_header(pcm_data: bytes, sample_rate: int = 16000, channels: int = 1
     )
     
     return header + pcm_data
+
+
+# ==================== STT Settings ====================
+
+@socketio.on("get_stt_settings")
+def handle_get_stt_settings():
+    """Get current STT settings from project."""
+    settings = {
+        "enabled": False,
+        "device_id": None,
+        "device_label": None,
+        "wake_words": ["hey beezle", "ok beezle"],
+        "stop_words": ["stop listening", "goodbye", "that's all"],
+        "max_duration": 30.0,
+    }
+    
+    if project_manager.current_project:
+        stt = project_manager.current_project.stt_settings
+        settings = {
+            "enabled": stt.enabled,
+            "device_id": stt.device_id,
+            "device_label": stt.device_label,
+            "wake_words": stt.wake_words,
+            "stop_words": stt.stop_words,
+            "max_duration": stt.max_duration,
+        }
+    
+    emit("stt_settings", settings)
+
+
+@socketio.on("set_stt_settings")
+def handle_set_stt_settings(data):
+    """Update STT settings."""
+    if not project_manager.current_project:
+        emit("error", {"message": "No project loaded"})
+        return
+    
+    stt = project_manager.current_project.stt_settings
+    
+    if "enabled" in data:
+        stt.enabled = data["enabled"]
+        logger.info(f"STT {'enabled' if stt.enabled else 'disabled'}")
+    
+    if "device_id" in data:
+        stt.device_id = data["device_id"]
+    
+    if "device_label" in data:
+        stt.device_label = data["device_label"]
+    
+    if "wake_words" in data:
+        stt.wake_words = data["wake_words"]
+    
+    if "stop_words" in data:
+        stt.stop_words = data["stop_words"]
+    
+    if "max_duration" in data:
+        stt.max_duration = float(data["max_duration"])
+    
+    # Emit updated settings
+    handle_get_stt_settings()
+
+
+# ==================== Continuous STT / Wake Word ====================
+
+# Per-session STT state: sid -> {"state": "idle"|"active", "buffer": AudioBuffer}
+_stt_sessions = {}
+
+
+def _check_wake_word(text: str, wake_words: list) -> tuple[bool, str]:
+    """Check if text starts with any wake word. Returns (matched, remainder)."""
+    text_lower = text.lower().strip()
+    for wake in wake_words:
+        wake_lower = wake.lower().strip()
+        if text_lower.startswith(wake_lower):
+            remainder = text[len(wake):].strip()
+            return True, remainder
+    return False, text
+
+
+def _check_stop_word(text: str, stop_words: list) -> bool:
+    """Check if text contains any stop word."""
+    text_lower = text.lower().strip()
+    for stop in stop_words:
+        if stop.lower().strip() in text_lower:
+            return True
+    return False
+
+
+def _get_stt_max_duration() -> float:
+    """Get max recording duration from project settings, with fallback."""
+    if project_manager.current_project:
+        return project_manager.current_project.stt_settings.max_duration
+    return 30.0  # Default fallback
+
+
+@socketio.on("stt_stream_start")
+def handle_stt_stream_start(data=None):
+    """Start continuous listening session."""
+    from beezle_bug.voice.vad import AudioBuffer
+    from flask import request
+    
+    sid = request.sid
+    max_duration = _get_stt_max_duration()
+    _stt_sessions[sid] = {
+        "state": "idle",
+        "buffer": AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000),
+        "speech_started": False,
+    }
+    logger.debug(f"STT stream started for session {sid} with max_duration={max_duration}s")
+    emit("stt_status", {"state": "idle", "message": "Listening for wake word..."})
+
+
+@socketio.on("stt_stream_chunk")
+def handle_stt_stream_chunk(data):
+    """Receive audio chunk in continuous listening mode."""
+    from flask import request
+    
+    sid = request.sid
+    if sid not in _stt_sessions:
+        logger.warning(f"STT stream chunk received for unknown session {sid}")
+        return
+    
+    session = _stt_sessions[sid]
+    
+    # Decode audio
+    if isinstance(data, dict) and "audio" in data:
+        audio_bytes = base64.b64decode(data["audio"])
+    elif isinstance(data, bytes):
+        audio_bytes = data
+    else:
+        logger.warning(f"Invalid STT stream chunk format: {type(data)}")
+        return
+    
+    # Check for speech using VAD info from frontend
+    speech_detected = data.get("speech", True)
+    
+    if speech_detected:
+        session["buffer"].append(audio_bytes)
+        if not session["speech_started"]:
+            logger.debug("Speech started - buffering audio")
+        session["speech_started"] = True
+    elif session["speech_started"]:
+        # Speech ended - process the segment
+        buffer_size = len(session["buffer"].get_audio())
+        logger.info(f"Speech ended - processing {buffer_size} bytes of audio")
+        _process_speech_segment(sid, session)
+        # Reset buffer for next segment
+        from beezle_bug.voice.vad import AudioBuffer
+        max_duration = _get_stt_max_duration()
+        session["buffer"] = AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000)
+        session["speech_started"] = False
+
+
+def _process_speech_segment(sid: str, session: dict):
+    """Process a completed speech segment - transcribe and check wake/stop words."""
+    audio_bytes = session["buffer"].get_audio()
+    
+    if len(audio_bytes) < 1000:
+        return
+    
+    def do_process():
+        try:
+            audio_with_header = _add_wav_header(audio_bytes, sample_rate=16000, channels=1)
+            transcriber = get_transcriber()
+            text = transcriber.transcribe(audio_with_header)
+            
+            if not text.strip():
+                return
+            
+            logger.debug(f"STT transcribed: {text}")
+            
+            # Get settings
+            stt_settings = None
+            if project_manager.current_project:
+                stt_settings = project_manager.current_project.stt_settings
+            
+            wake_words = stt_settings.wake_words if stt_settings else ["hey beezle"]
+            stop_words = stt_settings.stop_words if stt_settings else ["stop listening"]
+            
+            current_state = session["state"]
+            
+            if current_state == "idle":
+                # Check for wake word
+                matched, remainder = _check_wake_word(text, wake_words)
+                if matched:
+                    session["state"] = "active"
+                    socketio.emit("stt_activated", {}, to=sid)
+                    socketio.emit("stt_status", {"state": "active", "message": "Listening..."}, to=sid)
+                    logger.info(f"Wake word detected, switching to active mode")
+                    
+                    # If there's content after wake word, process it
+                    if remainder:
+                        _send_stt_message(sid, remainder)
+                else:
+                    # Emit what was heard (for debugging/feedback)
+                    socketio.emit("stt_partial", {"text": text}, to=sid)
+            
+            elif current_state == "active":
+                # Check for stop word
+                if _check_stop_word(text, stop_words):
+                    session["state"] = "idle"
+                    socketio.emit("stt_deactivated", {}, to=sid)
+                    socketio.emit("stt_status", {"state": "idle", "message": "Listening for wake word..."}, to=sid)
+                    logger.info(f"Stop word detected, switching to idle mode")
+                else:
+                    # Send as user message
+                    _send_stt_message(sid, text)
+                    
+        except Exception as e:
+            logger.error(f"STT processing error: {e}")
+    
+    socketio.start_background_task(do_process)
+
+
+def _send_stt_message(sid: str, text: str):
+    """Send transcribed text as a user message."""
+    socketio.emit("stt_message", {"text": text}, to=sid)
+    
+    # Also emit as chat message
+    socketio.emit("chat_message", {
+        "user": "User",
+        "message": text,
+        "source": "voice"
+    })
+    
+    # Process with agent graph
+    if project_manager.current_project and runtime.agents:
+        responses = runtime.send_user_message(text, "User")
+        for resp in responses:
+            logger.debug(f"Voice response from {resp['agent_name']}")
+
+
+@socketio.on("stt_stream_stop")
+def handle_stt_stream_stop(data=None):
+    """Stop continuous listening session."""
+    from flask import request
+    
+    sid = request.sid
+    if sid in _stt_sessions:
+        del _stt_sessions[sid]
+        logger.debug(f"STT stream stopped for session {sid}")
+    emit("stt_status", {"state": "stopped", "message": "Listening stopped"})
 
 
 # ==================== Main ====================

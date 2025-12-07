@@ -29,7 +29,7 @@ class Transcriber:
     def __init__(
         self,
         model_size: str = "base",
-        device: str = "cuda",
+        device: str = "cpu",
         compute_type: str = "float16"
     ):
         """
@@ -149,8 +149,8 @@ _transcriber: Optional[Transcriber] = None
 
 def get_transcriber(
     model_size: str = "base",
-    device: str = "cuda",
-    compute_type: str = "float16"
+    device: str = "cpu",
+    compute_type: str = "int8"
 ) -> Transcriber:
     """
     Get or create the global transcriber instance.

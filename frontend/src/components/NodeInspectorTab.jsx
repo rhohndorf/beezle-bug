@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../lib/socket';
-import { Bot, Brain, Database, MessageCircle, Monitor, Wrench, Clock } from 'lucide-react';
+import { Bot, Brain, Database, MessageCircle, Monitor, Wrench, Clock, Box, Share2, X } from 'lucide-react';
 
 const NODE_ICONS = {
   agent: Bot,
@@ -22,6 +22,243 @@ const NODE_COLORS = {
   scheduled_event: '#06b6d4',
 };
 
+// Knowledge Graph display component
+function KnowledgeGraphDisplay({ nodeId, isDeployed }) {
+  const [entities, setEntities] = useState([]);
+  const [relationships, setRelationships] = useState([]);
+  const [selectedEntityName, setSelectedEntityName] = useState(null);
+  const [selectedRelationshipKey, setSelectedRelationshipKey] = useState(null);
+  const currentNodeId = useRef(nodeId);
+
+  const selectedEntity = selectedEntityName ? entities.find(e => e.name === selectedEntityName) : null;
+  const selectedRelationship = selectedRelationshipKey ? relationships.find(r => 
+    `${r.from}-${r.type}-${r.to}` === selectedRelationshipKey
+  ) : null;
+
+  const relKey = (r) => `${r.from}-${r.type}-${r.to}`;
+
+  useEffect(() => {
+    currentNodeId.current = nodeId;
+    
+    // Request KG data when node is selected
+    if (nodeId && isDeployed) {
+      socket.emit('get_node_kg_data', { node_id: nodeId });
+    } else {
+      setEntities([]);
+      setRelationships([]);
+    }
+    
+    // Clear selection when node changes
+    setSelectedEntityName(null);
+    setSelectedRelationshipKey(null);
+  }, [nodeId, isDeployed]);
+
+  useEffect(() => {
+    // Listen for KG data response
+    const handleNodeKgData = (data) => {
+      if (data.node_id === currentNodeId.current) {
+        setEntities(data.entities || []);
+        setRelationships(data.relationships || []);
+      }
+    };
+
+    // Listen for real-time updates via agent_event
+    const handleAgentEvent = (event) => {
+      if (event.type !== 'tool.selected') return;
+      
+      const { tool_name, arguments: args } = event.data;
+      const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
+
+      // Add Entity
+      if (tool_name === 'AddEntity' && parsedArgs.name) {
+        setEntities(prev => prev.find(e => e.name === parsedArgs.name) 
+          ? prev 
+          : [...prev, { name: parsedArgs.name, type: parsedArgs.type || 'Entity', properties: {} }]
+        );
+      }
+
+      // Add Property to Entity
+      if (tool_name === 'AddPropertyToEntity' && parsedArgs.entity) {
+        setEntities(prev => {
+          const exists = prev.find(e => e.name === parsedArgs.entity);
+          if (exists) {
+            return prev.map(e => e.name === parsedArgs.entity 
+              ? { ...e, properties: { ...e.properties, [parsedArgs.property]: parsedArgs.value } } 
+              : e
+            );
+          }
+          return [...prev, { name: parsedArgs.entity, type: 'Entity', properties: { [parsedArgs.property]: parsedArgs.value } }];
+        });
+      }
+
+      // Add Relationship
+      if (tool_name === 'AddRelationship' && parsedArgs.entity1 && parsedArgs.entity2) {
+        setEntities(prev => {
+          let updated = [...prev];
+          if (!updated.find(e => e.name === parsedArgs.entity1)) {
+            updated.push({ name: parsedArgs.entity1, type: 'Entity', properties: {} });
+          }
+          if (!updated.find(e => e.name === parsedArgs.entity2)) {
+            updated.push({ name: parsedArgs.entity2, type: 'Entity', properties: {} });
+          }
+          return updated;
+        });
+        setRelationships(prev => {
+          const exists = prev.find(r => 
+            r.from === parsedArgs.entity1 && 
+            r.to === parsedArgs.entity2 && 
+            r.type === parsedArgs.relationship
+          );
+          return exists ? prev : [...prev, { 
+            from: parsedArgs.entity1, 
+            to: parsedArgs.entity2, 
+            type: parsedArgs.relationship,
+            properties: {}
+          }];
+        });
+      }
+
+      // Remove Entity
+      if (tool_name === 'RemoveEntity' && parsedArgs.entity) {
+        setEntities(prev => prev.filter(e => e.name !== parsedArgs.entity));
+        setRelationships(prev => prev.filter(r => 
+          r.from !== parsedArgs.entity && r.to !== parsedArgs.entity
+        ));
+        if (selectedEntityName === parsedArgs.entity) {
+          setSelectedEntityName(null);
+        }
+      }
+
+      // Remove Relationship
+      if (tool_name === 'RemoveRelationship' && parsedArgs.entity1 && parsedArgs.entity2) {
+        const keyToRemove = `${parsedArgs.entity1}-${parsedArgs.relationship}-${parsedArgs.entity2}`;
+        if (selectedRelationshipKey === keyToRemove) {
+          setSelectedRelationshipKey(null);
+        }
+        setRelationships(prev => prev.filter(r => 
+          !(r.from === parsedArgs.entity1 && 
+            r.to === parsedArgs.entity2 && 
+            r.type === parsedArgs.relationship)
+        ));
+      }
+    };
+
+    socket.on('node_kg_data', handleNodeKgData);
+    socket.on('agent_event', handleAgentEvent);
+
+    return () => {
+      socket.off('node_kg_data', handleNodeKgData);
+      socket.off('agent_event', handleAgentEvent);
+    };
+  }, [selectedEntityName, selectedRelationshipKey]);
+
+  const handleEntityClick = (name) => {
+    setSelectedEntityName(name);
+    setSelectedRelationshipKey(null);
+  };
+
+  const handleRelationshipClick = (r) => {
+    const key = relKey(r);
+    setSelectedRelationshipKey(selectedRelationshipKey === key ? null : key);
+    setSelectedEntityName(null);
+  };
+
+  if (!isDeployed) {
+    return (
+      <div className="text-xs text-[#555] p-3 bg-[#1a1a1a] rounded border border-[#2b2b2b]">
+        Deploy the project to view knowledge graph contents.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Selected Entity Details */}
+      {selectedEntity && (
+        <div className="p-2 bg-[#111] rounded border border-[#2b2b2b]">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-[#a855f7] font-medium text-xs">{selectedEntity.name}</span>
+            <button onClick={() => setSelectedEntityName(null)} className="text-[#666] hover:text-white"><X size={12}/></button>
+          </div>
+          <div className="text-[10px] text-[#666] mb-1">Type: {selectedEntity.type}</div>
+          <div className="text-[11px] text-[#888]">
+            {Object.entries(selectedEntity.properties || {}).map(([k, v]) => <div key={k}>{k}: {String(v)}</div>)}
+            {Object.keys(selectedEntity.properties || {}).length === 0 && <div className="text-[#555] italic">No properties</div>}
+          </div>
+        </div>
+      )}
+
+      {/* Selected Relationship Details */}
+      {selectedRelationship && (
+        <div className="p-2 bg-[#111] rounded border border-[#eab308]/30">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-[#eab308] font-medium text-[11px]">
+              {selectedRelationship.from} → {selectedRelationship.type} → {selectedRelationship.to}
+            </span>
+            <button onClick={() => setSelectedRelationshipKey(null)} className="text-[#666] hover:text-white"><X size={12}/></button>
+          </div>
+          <div className="text-[11px] text-[#888]">
+            {selectedRelationship.properties && Object.entries(selectedRelationship.properties).map(([k, v]) => (
+              <div key={k}>{k}: {String(v)}</div>
+            ))}
+            {(!selectedRelationship.properties || Object.keys(selectedRelationship.properties).length === 0) && (
+              <div className="text-[#555] italic">No properties</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Entities List */}
+      <div>
+        <div className="text-[10px] text-[#666] uppercase mb-1">Entities ({entities.length})</div>
+        <div className="max-h-32 overflow-y-auto bg-[#0a0a0a] border border-[#2b2b2b] rounded">
+          {entities.length === 0 && <div className="text-[10px] text-[#555] italic px-2 py-2">No entities yet</div>}
+          {entities.map((e, i) => (
+            <div 
+              key={i} 
+              onClick={() => handleEntityClick(e.name)} 
+              className={`flex items-center gap-2 px-2 py-1 cursor-pointer ${selectedEntityName === e.name ? 'bg-[#a855f7]/20' : 'hover:bg-[#1a1a1a]'}`}
+            >
+              <Box size={10} className="text-[#666] flex-shrink-0"/>
+              <span className="text-xs truncate flex-1">{e.name}</span>
+              <span className="text-[9px] text-[#555]">{e.type}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Relationships List */}
+      <div>
+        <div className="text-[10px] text-[#666] uppercase mb-1">Relationships ({relationships.length})</div>
+        <div className="max-h-32 overflow-y-auto bg-[#0a0a0a] border border-[#2b2b2b] rounded">
+          {relationships.length === 0 && <div className="text-[10px] text-[#555] italic px-2 py-2">No relationships yet</div>}
+          {relationships.map((r, i) => {
+            const key = relKey(r);
+            const hasProps = r.properties && Object.keys(r.properties).length > 0;
+            return (
+              <div 
+                key={i} 
+                onClick={() => handleRelationshipClick(r)}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] cursor-pointer ${
+                  selectedRelationshipKey === key ? 'bg-[#eab308]/20' : 'hover:bg-[#1a1a1a]'
+                }`}
+              >
+                <Share2 size={10} className="text-[#eab308] shrink-0"/>
+                <span className="truncate">{r.from}</span>
+                <span className="text-[#555]">→</span>
+                <span className="text-[#888]">{r.type}</span>
+                <span className="text-[#555]">→</span>
+                <span className="truncate">{r.to}</span>
+                {hasProps && <span className="text-[9px] text-[#eab308] ml-1">●</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function NodeInspectorTab({ selectedNode, isDeployed }) {
   const [templates, setTemplates] = useState([]);
   const [tools, setTools] = useState({ tools: [], presets: {} });
@@ -30,17 +267,20 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
     socket.emit('get_templates');
     socket.emit('get_tools');
 
-    socket.on('templates_list', (data) => {
+    const handleTemplatesList = (data) => {
       setTemplates(data.templates || []);
-    });
+    };
 
-    socket.on('tools_list', (data) => {
+    const handleToolsList = (data) => {
       setTools(data);
-    });
+    };
+
+    socket.on('templates_list', handleTemplatesList);
+    socket.on('tools_list', handleToolsList);
 
     return () => {
-      socket.off('templates_list');
-      socket.off('tools_list');
+      socket.off('templates_list', handleTemplatesList);
+      socket.off('tools_list', handleToolsList);
     };
   }, []);
 
@@ -181,11 +421,9 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
           </div>
         )}
 
-        {/* Knowledge Graph - minimal config */}
+        {/* Knowledge Graph - show entities and relationships */}
         {selectedNode.type === 'knowledge_graph' && (
-          <div className="text-xs text-[#555]">
-            Connect agents to this node to share a knowledge graph.
-          </div>
+          <KnowledgeGraphDisplay nodeId={selectedNode.id} isDeployed={isDeployed} />
         )}
 
         {/* Toolbox - tool selection */}
@@ -296,8 +534,23 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
               </div>
             )}
 
+            <div>
+              <label className="text-[10px] text-[#666] uppercase tracking-wide block mb-1">Message Content</label>
+              <textarea
+                value={config.message_content || 'Review your current state and pending tasks.'}
+                onChange={(e) => updateConfig('message_content', e.target.value)}
+                disabled={isDeployed}
+                rows={3}
+                className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#2b2b2b] rounded text-xs text-[#e5e5e5] disabled:opacity-50 focus:outline-none focus:border-[#06b6d4] resize-none"
+                placeholder="Message to send to the agent..."
+              />
+              <p className="text-[10px] text-[#555] mt-1">
+                This message will be sent to the connected agent when the event fires.
+              </p>
+            </div>
+
             <div className="text-xs text-[#555] p-3 bg-[#1a1a1a] rounded border border-[#2b2b2b]">
-              Connect the <span className="text-[#eab308]">trigger_out</span> port to an <span className="text-[#3b82f6]">Agent's</span> <span className="text-[#eab308]">trigger_in</span> port to schedule agent activation.
+              Connect the <span className="text-[#06b6d4]">message_out</span> port to an <span className="text-[#3b82f6]">Agent's</span> <span className="text-[#3b82f6]">message_in</span> port to schedule message delivery.
             </div>
           </>
         )}
@@ -305,4 +558,3 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
     </div>
   );
 }
-

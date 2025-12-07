@@ -298,19 +298,20 @@ class AgentGraphRuntime:
             logger.info(f"Stopped agent node: {node_id}")
 
     def _start_scheduled_event_node(self, node: Node, agent_graph: AgentGraph) -> None:
-        """Start a Scheduled Event node that triggers connected agents."""
+        """Start a Scheduled Event node that sends messages to connected agents."""
         config = node.config if isinstance(node.config, dict) else node.config.model_dump()
         name = config.get("name", "Scheduled Event")
         trigger_type = config.get("trigger_type", "interval")
         run_at_str = config.get("run_at")
         interval_seconds = config.get("interval_seconds", 30)
+        message_content = config.get("message_content", "Review your current state and pending tasks.")
 
-        # Find connected agents via TRIGGER edges from trigger_out port
+        # Find connected agents via MESSAGE edges from message_out port
         target_agent_ids = []
         for edge in agent_graph.get_edges_for_node(node.id):
-            if edge.edge_type != EdgeType.TRIGGER:
+            if edge.edge_type != EdgeType.MESSAGE:
                 continue
-            if edge.source_node != node.id or edge.source_port != "trigger_out":
+            if edge.source_node != node.id or edge.source_port != "message_out":
                 continue
             target_node = agent_graph.get_node(edge.target_node)
             if target_node and target_node.type == NodeType.AGENT:
@@ -322,7 +323,7 @@ class AgentGraphRuntime:
 
         task_id = f"{node.id}_scheduled"
 
-        def scheduled_tick(agent_ids=target_agent_ids, event_name=name):
+        def scheduled_tick(agent_ids=target_agent_ids, event_name=name, content=message_content):
             for agent_id in agent_ids:
                 agent = self.agents.get(agent_id)
                 if agent:
@@ -332,7 +333,7 @@ class AgentGraphRuntime:
                         agent_config = agent_node.config if isinstance(agent_node.config, dict) else agent_node.config.model_dump()
                         agent_name = agent_config.get("name", "Agent")
 
-                    response = agent.tick(trigger=f"scheduled:{event_name}")
+                    response = agent.process_message(event_name, content)
                     if response:
                         self._route_agent_response(agent_id, agent_name, response)
 

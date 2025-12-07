@@ -55,7 +55,6 @@ const NODE_TYPES = {
 // Edge type definitions
 const EDGE_TYPES = {
   message: { label: 'Message', color: '#3b82f6' },
-  trigger: { label: 'Trigger', color: '#eab308' },
   pipeline: { label: 'Pipeline', color: '#22c55e' },
   resource: { label: 'Resource', color: '#a855f7', dashed: true },
   delegate: { label: 'Delegate', color: '#f97316', dashed: true },
@@ -335,13 +334,8 @@ export default function NodeGraph({ onSelectNode, selectedNodeId }) {
         } else if (srcPortId === 'ask' && tgtPortId === 'answer') {
           // Agent-to-agent delegate connection
           edgeType = 'delegate';
-        } else if (srcPortId === 'trigger_out' && tgtPortId === 'trigger_in') {
-          // Scheduled event to agent trigger connection
-          edgeType = 'trigger';
-        } else if (actualSourceNode?.type === 'scheduled_event' || srcPortId.includes('trigger') || tgtPortId.includes('trigger')) {
-          // Any connection involving scheduled_event or trigger ports
-          edgeType = 'trigger';
         }
+        // scheduled_event message_out -> agent message_in uses MESSAGE edge type (default)
         
         socket.emit('add_edge', {
           source_node: srcNodeId,
