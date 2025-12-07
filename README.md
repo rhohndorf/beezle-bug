@@ -25,7 +25,7 @@
 
 Beezle Bug features a three-column layout with resizable panels:
 
-### Main Interface
+### Interface
 
 ![Main Interface](imgs/screenshots/main_interface.png)
 *The full Beezle Bug interface showing all panels*
@@ -33,8 +33,6 @@ Beezle Bug features a three-column layout with resizable panels:
 ---
 
 ### 1. Menu Bar
-
-![Menu Bar](imgs/screenshots/menubar.png)
 
 The top menu bar provides:
 - **Project Selector** – Create, load, and switch between projects
@@ -44,8 +42,6 @@ The top menu bar provides:
 ---
 
 ### 2. Neural Stream (Left Panel - Top)
-
-![Neural Stream](imgs/screenshots/neural_stream.png)
 
 Real-time introspection of agent activity:
 - **Message events** – When agents receive input
@@ -58,8 +54,6 @@ Real-time introspection of agent activity:
 
 ### 3. Log Panel (Left Panel - Bottom)
 
-![Log Panel](imgs/screenshots/log_panel.png)
-
 System logs with color-coded entries:
 - ✅ Success messages (green)
 - ℹ️ Info messages (blue)
@@ -70,8 +64,6 @@ System logs with color-coded entries:
 
 ### 4. Chat Tab (Center Panel)
 
-![Chat Interface](imgs/screenshots/chat.png)
-
 Conversation interface with deployed agents:
 - **Markdown support** – Code blocks, lists, links
 - **Audio playback** – TTS-generated responses
@@ -81,8 +73,6 @@ Conversation interface with deployed agents:
 ---
 
 ### 5. Node Graph Tab (Center Panel)
-
-![Node Graph](imgs/screenshots/node_graph.png)
 
 Visual editor for building agent pipelines:
 
@@ -107,8 +97,6 @@ Visual editor for building agent pipelines:
 
 ### 6. Template Editor Tab (Center Panel)
 
-![Template Editor](imgs/screenshots/template_editor.png)
-
 Edit and manage Jinja2 templates for agent system prompts:
 - **Template list** – All available templates
 - **Syntax highlighting** – Jinja2 + Markdown
@@ -127,15 +115,12 @@ Built-in templates include:
 
 ### 7. Settings Panel (Right Panel - Top)
 
-![Settings Panel](imgs/screenshots/settings_panel.png)
-
 Tabbed configuration interface:
 
 #### Agents Tab
 View and manage running agent instances.
 
 #### Node Inspector Tab
-![Node Inspector](imgs/screenshots/node_inspector.png)
 
 Configure the selected node's properties:
 - Agent: Model, API URL, system template
@@ -148,7 +133,6 @@ Configure the selected node's properties:
 View and manage scheduled events.
 
 #### Voice Tab
-![Voice Settings](imgs/screenshots/voice_settings.png)
 
 **Voice Input (Speech-to-Text):**
 - **Continuous Listening** – Enable/disable wake word detection
@@ -188,7 +172,7 @@ When a Knowledge Graph node is selected, the Node Inspector displays:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/beezle-bug.git
+git clone https://github.com/rhohndorf/beezle-bug.git
 cd beezle-bug
 
 # Start the services
@@ -283,40 +267,23 @@ Agents can use these built-in tools:
 | **Web** | SearchWeb, SearchNews, ReadWebsite |
 | **Filesystem** | ReadFile, WriteFile, ListDirectory |
 | **System** | ExecuteCommand, RunPython |
-| **Messaging** | SendAgentMessage |
 
 ---
 
 ## 🔮 Vision & Roadmap
 
-Inspired by the AI companion from Otherland, Beezle Bug aims to explore:
-
 ### Autonomy ✅
 - [x] Continuous autonomous operation
 - [x] Tool use and execution
 - [x] Memory management
-- [ ] Advanced planning
 
 ### Cooperation 🚧
-- [ ] Multi-agent task delegation
+- [x] Multi-agent task delegation
 - [ ] Agent specialization
-- [x] Inter-agent messaging
 
 ### Self-Improvement 🔮
 - [ ] Dynamic tool creation
 - [ ] Self-fine-tuning
-- [ ] Capability expansion
-
----
-
-## 📖 Documentation
-
-- [Getting Started](docs/getting_started.md)
-- [Architecture Overview](docs/architecture.md)
-- [Agent System](docs/agents.md)
-- [Tools Reference](docs/tools.md)
-- [Memory Management](docs/memory_management.md)
-- [LLM Adapters](docs/llm_adapters.md)
 
 ---
 
@@ -333,10 +300,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for speech recognition
 - [React Flow](https://reactflow.dev/) inspiration for the node graph
 - The open-source AI community
-
----
-
-<p align="center">
-  <i>"Originally a kids' toy, it was upgraded many times until it's almost as sentient as a real person."</i><br>
-  — Otherland, on Beezle Bug
-</p>
