@@ -3,7 +3,7 @@ Core agent module for Beezle Bug.
 
 This module implements the Agent class which handles LLM interactions,
 tool calling, and memory management. The agent operates synchronously
-and can be triggered by user messages or by a scheduler for autonomous behavior.
+and is triggered by messages from users or event nodes.
 """
 
 import json
@@ -26,9 +26,7 @@ class Agent:
     Unified agent that handles LLM interactions and tool execution.
     
     The Agent class provides a conversation interface with tool calling capabilities.
-    It can be triggered by:
-    - User messages (request-response model)
-    - Scheduler (for autonomous/periodic behavior)
+    It is triggered by messages from users or event nodes (e.g. ScheduledEventNode).
     
     Attributes:
         name: The agent's name
@@ -70,7 +68,6 @@ class Agent:
         self.toolbox = toolbox
         self.memory_stream = memory_stream if memory_stream is not None else MemoryStream()
         self.knowledge_graph = knowledge_graph if knowledge_graph is not None else KnowledgeGraph()
-        self.contacts: Dict[str, Queue] = {}
         self.event_bus = event_bus
         self.system_message_template = system_template
         
@@ -83,24 +80,16 @@ class Agent:
                 data=data
             ))
 
-    def add_contact(self, name: str, message_queue: Queue) -> None:
-        """
-        Add a contact the agent can send messages to.
-        
-        Args:
-            name: Contact name/identifier
-            message_queue: Queue to send messages to this contact
-        """
-        self.contacts[name] = message_queue
 
     def process_message(self, sender: str, content: str) -> Optional[str]:
         """
         Process an incoming message and generate a response.
         
-        This is the main entry point for user-triggered interactions.
+        This is the main entry point for all agent interactions, whether from
+        users, other agents, or event nodes (e.g. ScheduledEventNode).
         
         Args:
-            sender: Name of the message sender
+            sender: Name of the message sender (user name, agent name, or event node name)
             content: Message content
             
         Returns:
@@ -115,34 +104,6 @@ class Agent:
         self.memory_stream.add(Message(role="user", content=f"[{sender}]: {content}"))
         
         # Generate response
-        response = self._think()
-        
-        return response
-
-    def tick(self, trigger: str = "scheduler") -> Optional[str]:
-        """
-        Perform one autonomous thinking cycle.
-        
-        This is called by the scheduler for autonomous behavior.
-        The agent reviews its state and decides what to do.
-        
-        Args:
-            trigger: What triggered this tick (for logging)
-            
-        Returns:
-            Agent's response/action, or None if nothing to do
-        """
-        self._emit(EventType.LLM_CALL_STARTED, {
-            "trigger": trigger,
-            "context_messages": len(self.memory_stream.memories)
-        })
-        
-        # Add a system prompt for autonomous behavior
-        self.memory_stream.add(Message(
-            role="system", 
-            content=f"[Scheduler tick: {trigger}] Review your current state and pending tasks."
-        ))
-        
         response = self._think()
         
         return response

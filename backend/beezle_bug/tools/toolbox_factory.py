@@ -25,9 +25,6 @@ from beezle_bug.tools.system import (
 # Python tools
 from beezle_bug.tools.python import ExecPythonCode
 
-# Task tools
-from beezle_bug.tools.tasks import MakePlan, CreateTask
-
 # Web tools
 from beezle_bug.tools.web import ReadWebsite, SearchWeb, SearchNews
 
@@ -86,10 +83,6 @@ class ToolboxFactory:
         
         # Python
         "exec_python": ExecPythonCode,
-        
-        # Tasks
-        "make_plan": MakePlan,
-        "create_task": CreateTask,
         
         # Web
         "read_website": ReadWebsite,

@@ -20,17 +20,31 @@ from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 
 from beezle_bug import constants as const
-from beezle_bug.agents import AgentConfig
-from beezle_bug.agents.agent_manager import AgentManager, AgentState
 from beezle_bug.events import EventBus
-from beezle_bug.exceptions import (
-    AgentNotFoundError,
-    AgentAlreadyInstancedError,
-    AgentNotInstancedError
-)
 from beezle_bug.scheduler import Scheduler
 from beezle_bug.template import TemplateLoader
 from beezle_bug.tools.toolbox_factory import ToolboxFactory
+from beezle_bug.storage import StorageService
+from beezle_bug.project_manager import ProjectManager
+from beezle_bug.agent_graph import (
+    AgentGraphRuntime,
+    Node,
+    Edge,
+    NodeType,
+    EdgeType,
+    Position,
+    AgentNodeConfig,
+    KnowledgeGraphNodeConfig,
+    MemoryStreamNodeConfig,
+    ToolboxNodeConfig,
+    UserInputNodeConfig,
+    UserOutputNodeConfig,
+    ScheduledEventNodeConfig,
+)
+from beezle_bug.project import TTSSettings, STTSettings
+from beezle_bug.voice.tts import PiperTTS, get_tts, PIPER_AVAILABLE
+
+import base64
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "beezle-secret"
@@ -46,14 +60,9 @@ scheduler = Scheduler(tick_interval=1.0)
 toolbox_factory = ToolboxFactory()
 template_loader = TemplateLoader(DATA_DIR)
 
-
-def on_agent_message(agent_id: str, agent_name: str, message: str):
-    """Callback for agent messages - emits to all connected clients."""
-    socketio.emit("chat_message", {
-        "agentId": agent_id,
-        "user": agent_name,
-        "message": message
-    })
+# TTS State
+tts_enabled = False
+tts_instance: PiperTTS = None
 
 
 def event_handler(event):
@@ -64,15 +73,51 @@ def event_handler(event):
         logger.error(f"Failed to emit event: {e}")
 
 
-# Initialize AgentManager
-agent_manager = AgentManager(
-    data_dir=DATA_DIR,
+
+# Initialize Storage, Runtime, and ProjectManager
+def on_agent_graph_message(agent_id: str, agent_name: str, message: str):
+    """Callback for agent graph messages - emits to all connected clients."""
+    global tts_enabled, tts_instance
+    
+    msg_data = {
+        "agentId": agent_id,
+        "user": agent_name,
+        "message": message,
+        "source": "agent_graph"
+    }
+    
+    # Generate TTS audio if enabled
+    if tts_enabled and tts_instance is not None:
+        try:
+            if tts_instance.voice is None:
+                logger.warning("TTS enabled but no voice loaded")
+            else:
+                audio_bytes = tts_instance.synthesize(message)
+                if audio_bytes:
+                    # Send as base64 data URL - no disk write needed
+                    audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                    msg_data["audioUrl"] = f"data:audio/wav;base64,{audio_b64}"
+                    logger.info(f"Generated TTS audio: {len(audio_bytes)} bytes")
+                else:
+                    logger.warning("TTS synthesis returned no audio")
+        except Exception as e:
+            logger.error(f"TTS synthesis failed: {e}")
+    
+    socketio.emit("chat_message", msg_data)
+
+
+storage = StorageService(data_dir=DATA_DIR)
+
+runtime = AgentGraphRuntime(
+    storage=storage,
     event_bus=event_bus,
     scheduler=scheduler,
-    toolbox_factory=toolbox_factory,
     template_loader=template_loader,
-    on_agent_message=on_agent_message
+    toolbox_factory=toolbox_factory,
+    on_agent_graph_message=on_agent_graph_message,
 )
+
+project_manager = ProjectManager(storage=storage, runtime=runtime)
 
 # Subscribe to all events
 event_bus.subscribe_all(event_handler)
@@ -83,66 +128,38 @@ scheduler.start()
 
 # ==================== Helper Functions ====================
 
-def emit_agents_list():
-    """Emit the combined list of persisted and instanced agents."""
-    persisted = agent_manager.list_persisted_agents()
-    instanced = agent_manager.list_instanced_agents()
-    
-    socketio.emit("agents_list", {
-        "persisted": persisted,
-        "instanced": instanced
-    })
+def get_agent_graph_state() -> dict:
+    """Get the current agent graph state for the frontend."""
+    if not project_manager.current_project:
+        return {"nodes": [], "edges": [], "is_deployed": False}
 
-
-def emit_agent_status(agent_id: str):
-    """Emit status for a specific agent."""
-    agent = agent_manager.get_agent(agent_id)
-    state = agent_manager.get_state(agent_id)
-    
-    if agent and state:
-        socketio.emit("agent_status", {
-            "id": agent_id,
-            "name": agent.name,
-            "state": state.value,
-            "autonomousEnabled": agent_manager._is_autonomous_enabled(agent_id)
-        })
-
-
-def emit_knowledge_graph_state(agent_id: str):
-    """Emit the full knowledge graph state for an agent."""
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        return
-    
-    kg = agent.knowledge_graph
-    
-    # Build entities list
-    entities = []
-    for entity_name in kg.graph.nodes():
-        node_data = kg.graph.nodes[entity_name]
-        entities.append({
-            "name": entity_name,
-            "type": node_data.get("type", "Entity"),
-            "properties": {k: v for k, v in node_data.items() if k != "type"}
-        })
-    
-    # Build relationships list
-    relationships = []
-    for entity1, entity2, edge_data in kg.graph.edges(data=True):
-        rel_type = edge_data.get("relationship", "related_to")
-        props = {k: v for k, v in edge_data.items() if k != "relationship"}
-        relationships.append({
-            "from": entity1,
-            "to": entity2,
-            "type": rel_type,
-            "properties": props
-        })
-    
-    socketio.emit("knowledge_graph_state", {
-        "agentId": agent_id,
-        "entities": entities,
-        "relationships": relationships
-    })
+    project = project_manager.current_project
+    return {
+        "project_id": project.id,
+        "project_name": project.name,
+        "is_deployed": runtime.is_deployed,
+        "nodes": [
+            {
+                "id": node.id,
+                "type": node.type.value,
+                "position": {"x": node.position.x, "y": node.position.y},
+                "config": node.config.model_dump(),
+                "ports": node.get_ports(),
+            }
+            for node in project.agent_graph.nodes
+        ],
+        "edges": [
+            {
+                "id": edge.id,
+                "source_node": edge.source_node,
+                "source_port": edge.source_port,
+                "target_node": edge.target_node,
+                "target_port": edge.target_port,
+                "edge_type": edge.edge_type.value,
+            }
+            for edge in project.agent_graph.edges
+        ],
+    }
 
 
 # ==================== Routes ====================
@@ -157,36 +174,11 @@ def index():
 @socketio.on("connect")
 def handle_connect():
     logger.info("Client connected")
-    
-    # Send agents list
-    persisted = agent_manager.list_persisted_agents()
-    instanced = agent_manager.list_instanced_agents()
-    emit("agents_list", {
-        "persisted": persisted,
-        "instanced": instanced
-    })
-    
-    # Send status for all instanced agents
-    for agent_info in instanced:
-        emit("agent_status", agent_info)
 
 
 @socketio.on("disconnect")
 def handle_disconnect():
     logger.info("Client disconnected")
-
-
-# ==================== Agent List ====================
-
-@socketio.on("list_agents")
-def handle_list_agents():
-    """Get list of all agents (persisted and instanced)."""
-    persisted = agent_manager.list_persisted_agents()
-    instanced = agent_manager.list_instanced_agents()
-    emit("agents_list", {
-        "persisted": persisted,
-        "instanced": instanced
-    })
 
 
 # ==================== Tools & Templates ====================
@@ -211,227 +203,67 @@ def handle_get_templates():
     })
 
 
-@socketio.on("get_agent_config")
-def handle_get_config(data=None):
-    """Get configuration for a specific agent."""
-    agent_id = data.get("id") if data else None
-    
-    if agent_id:
-        config = agent_manager.get_config(agent_id)
-        if config:
-            emit("agent_config", {
-                "id": agent_id,
-                **config.model_dump()
-            })
-            return
-    
-    # Return empty config for new agent
-    emit("agent_config", {"id": None})
-
-
-# ==================== Agent Lifecycle ====================
-
-@socketio.on("create_agent")
-def handle_create_agent(data):
-    """Create a new agent and load it into memory."""
-    try:
-        config = AgentConfig.model_validate(data)
-        agent_id = agent_manager.create_agent(config)
-        
-        emit_agent_status(agent_id)
-        emit_agents_list()
-        emit_knowledge_graph_state(agent_id)
-        
-        logger.info(f"Created agent {agent_id} ({config.name})")
-        socketio.emit("log", {"type": "success", "message": f"Agent '{agent_id}' created"})
-        
-    except Exception as e:
-        logger.error(f"Failed to create agent: {e}")
-        emit("error", {"message": str(e)})
-
-
-@socketio.on("load_agent")
-def handle_load_agent(data):
-    """Load a persisted agent into memory."""
-    agent_id = data.get("id")
-    if not agent_id:
+@socketio.on("get_template_content")
+def handle_get_template_content(data):
+    """Get the raw content of a specific template."""
+    name = data.get("name")
+    if not name:
+        emit("error", {"message": "Template name required"})
         return
     
     try:
-        agent_manager.load_agent(agent_id)
-        
-        emit_agent_status(agent_id)
-        emit_agents_list()
-        emit_knowledge_graph_state(agent_id)
-        
-        logger.info(f"Loaded agent {agent_id}")
-        socketio.emit("log", {"type": "success", "message": f"Agent '{agent_id}' loaded"})
-        
-    except AgentNotFoundError as e:
-        logger.error(f"Agent not found: {e}")
-        emit("error", {"message": f"Agent not found: {e}"})
-    except AgentAlreadyInstancedError as e:
-        logger.warning(f"Agent already loaded: {e}")
+        content = template_loader.get_content(name)
+        emit("template_content", {
+            "name": name,
+            "content": content
+        })
+    except FileNotFoundError as e:
+        emit("error", {"message": str(e)})
+
+
+@socketio.on("save_template")
+def handle_save_template(data):
+    """Create or update a template file."""
+    name = data.get("name")
+    content = data.get("content")
+    
+    if not name:
+        emit("error", {"message": "Template name required"})
+        return
+    if content is None:
+        emit("error", {"message": "Template content required"})
+        return
+    
+    try:
+        template_loader.save(name, content)
+        emit("template_saved", {"name": name})
+        socketio.emit("log", {"type": "success", "message": f"Template saved: {name}"})
+        # Also emit updated template list
+        emit("templates_list", {"templates": template_loader.list_templates()})
+    except Exception as e:
+        logger.error(f"Failed to save template: {e}")
+        emit("error", {"message": f"Failed to save template: {e}"})
+
+
+@socketio.on("delete_template")
+def handle_delete_template(data):
+    """Delete a template file."""
+    name = data.get("name")
+    if not name:
+        emit("error", {"message": "Template name required"})
+        return
+    
+    try:
+        template_loader.delete(name)
+        emit("template_deleted", {"name": name})
+        socketio.emit("log", {"type": "success", "message": f"Template deleted: {name}"})
+        # Also emit updated template list
+        emit("templates_list", {"templates": template_loader.list_templates()})
+    except FileNotFoundError as e:
         emit("error", {"message": str(e)})
     except Exception as e:
-        logger.error(f"Failed to load agent: {e}")
-        emit("error", {"message": f"Failed to load agent: {e}"})
-
-
-@socketio.on("pause_agent")
-def handle_pause_agent(data):
-    """Pause an agent."""
-    agent_id = data.get("id")
-    if not agent_id:
-        return
-    
-    try:    
-        agent_manager.pause_agent(agent_id)
-        emit_agent_status(agent_id)
-        emit_agents_list()
-        
-        socketio.emit("log", {"type": "info", "message": f"Agent '{agent_id}' paused"})
-        
-    except AgentNotInstancedError as e:
-        logger.error(f"Agent not loaded: {e}")
-        emit("error", {"message": str(e)})
-
-
-@socketio.on("resume_agent")
-def handle_resume_agent(data):
-    """Resume a paused agent."""
-    agent_id = data.get("id")
-    if not agent_id:
-        return
-    
-    try:
-        agent_manager.resume_agent(agent_id)
-        emit_agent_status(agent_id)
-        emit_agents_list()
-        
-        socketio.emit("log", {"type": "success", "message": f"Agent '{agent_id}' resumed"})
-        
-    except AgentNotInstancedError as e:
-        logger.error(f"Agent not loaded: {e}")
-        emit("error", {"message": str(e)})
-
-
-@socketio.on("stop_agent")
-def handle_stop_agent(data):
-    """Stop an agent (persist and unload)."""
-    agent_id = data.get("id")
-    if not agent_id:
-        return
-    
-    agent_manager.stop_agent(agent_id)
-    
-    emit("agent_status", {
-        "id": agent_id,
-        "state": "stopped"
-    }, broadcast=True)
-    emit_agents_list()
-    
-    socketio.emit("log", {"type": "info", "message": f"Agent '{agent_id}' stopped"})
-
-
-@socketio.on("delete_agent")
-def handle_delete_agent(data):
-    """Delete an agent completely."""
-    agent_id = data.get("id")
-    if not agent_id:
-        return
-
-    agent_manager.delete_agent(agent_id)
-    
-    emit("agent_status", {
-        "id": agent_id,
-        "state": "deleted"
-    }, broadcast=True)
-    emit_agents_list()
-    
-    logger.info(f"Agent {agent_id} deleted")
-    socketio.emit("log", {"type": "warning", "message": f"Agent '{agent_id}' deleted"})
-
-
-# ==================== Agent Configuration ====================
-
-@socketio.on("save_agent_config")
-def handle_save_config(data):
-    """Save/update agent configuration."""
-    agent_id = data.get("id")
-    
-    if not agent_id:
-        # Create new agent
-        try:
-            config = AgentConfig.model_validate(data)
-            agent_id = agent_manager.create_agent(config)
-            
-            emit_agent_status(agent_id)
-            emit_agents_list()
-            emit_knowledge_graph_state(agent_id)
-            
-        except Exception as e:
-            logger.error(f"Failed to create agent: {e}")
-            emit("error", {"message": str(e)})
-    else:
-        # Update existing config
-        try:
-            config = AgentConfig.model_validate(data)
-            agent_manager._save_config(agent_id, config)
-            
-            emit("agent_config", {"id": agent_id, **config.model_dump()})
-            emit_agents_list()
-            
-        except Exception as e:
-            logger.error(f"Failed to save config: {e}")
-            emit("error", {"message": str(e)})
-
-
-# ==================== Autonomous Mode ====================
-
-@socketio.on("set_autonomous")
-def handle_set_autonomous(data):
-    """Enable/disable autonomous mode for an agent."""
-    agent_id = data.get("id")
-    enabled = data.get("enabled", False)
-    interval = data.get("interval", 30)
-    
-    if not agent_id or not agent_manager.is_instanced(agent_id):
-        return
-    
-    try:
-        agent_manager.set_autonomous(agent_id, enabled, interval)
-        emit_agent_status(agent_id)
-        
-    except AgentNotInstancedError as e:
-        logger.error(f"Agent not loaded: {e}")
-        emit("error", {"message": str(e)})
-
-
-@socketio.on("trigger_agent_tick")
-def handle_trigger_tick(data=None):
-    """Manually trigger an agent tick."""
-    agent_id = data.get("id") if data else None
-    
-    if not agent_id or not agent_manager.is_instanced(agent_id):
-        return
-    
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        return
-    
-    def do_tick():
-        response = agent_manager.trigger_tick(agent_id, trigger="manual")
-        if response:
-            socketio.emit("chat_message", {
-                "agentId": agent_id,
-                "user": agent.name,
-                "message": response
-            })
-        agent_manager.process_outgoing_messages(agent_id)
-    
-    socketio.start_background_task(do_tick)
-
+        logger.error(f"Failed to delete template: {e}")
+        emit("error", {"message": f"Failed to delete template: {e}"})
 
 # ==================== Chat ====================
 
@@ -439,37 +271,21 @@ def handle_trigger_tick(data=None):
 def handle_message(data):
     """Handle chat messages from users."""
     logger.info(f"Message: {data}")
-    emit("chat_message", data, broadcast=True)
+    emit("chat_message", data)
     
     user = data.get("user", "User")
     message = data.get("message", "")
     target_agent_id = data.get("agentId")
     
-    # Process message with instanced agents
-    for agent_info in agent_manager.list_instanced_agents():
-        agent_id = agent_info["id"]
-        agent_name = agent_info["name"]
+    # If an agent graph project is active, route through it
+    if project_manager.current_project and runtime.agents:
+        def process_agent_graph():
+            responses = runtime.send_user_message(message, user)
+            for resp in responses:
+                logger.debug(f"Agent graph response from {resp['agent_name']}")
         
-        # Skip if targeting a different agent
-        if target_agent_id and agent_id != target_agent_id:
-            continue
-        
-        # Skip paused agents
-        if agent_info["state"] == AgentState.PAUSED.value:
-            continue
-        
-        if user != agent_name:  # Don't process agent's own messages
-            def process(aid=agent_id, aname=agent_name):
-                response = agent_manager.process_message(aid, user, message)
-                if response:
-                    socketio.emit("chat_message", {
-                        "agentId": aid,
-                        "user": aname,
-                        "message": response
-                    })
-                agent_manager.process_outgoing_messages(aid)
-            
-            socketio.start_background_task(process)
+        socketio.start_background_task(process_agent_graph)
+        return
 
 
 # ==================== Schedule ====================
@@ -518,19 +334,894 @@ def handle_cancel_task(data):
         scheduler.cancel_task(task_id)
         handle_get_schedule()
 
+# ==================== Project Management ====================
 
-# ==================== Knowledge Graph ====================
+@socketio.on("list_projects")
+def handle_list_projects():
+    """List all saved projects."""
+    projects = project_manager.list_projects()
+    emit("projects_list", {"projects": projects})
 
-@socketio.on("get_knowledge_graph")
-def handle_get_knowledge_graph(data=None):
-    """Get the knowledge graph state for a specific agent."""
-    agent_id = data.get("id") if data else None
+
+@socketio.on("create_project")
+def handle_create_project(data):
+    """Create a new project."""
+    name = data.get("name", "Untitled Project")
+    try:
+        project = project_manager.create_project(name)
+        emit("project_created", {
+            "id": project.id,
+            "name": project.name,
+        })
+        handle_list_projects()
+        socketio.emit("log", {"type": "success", "message": f"Project '{name}' created"})
+    except Exception as e:
+        logger.error(f"Failed to create project: {e}")
+        emit("error", {"message": str(e)})
+
+
+@socketio.on("load_project")
+def handle_load_project(data):
+    """Load a project and instantiate its agent graph."""
+    global tts_enabled, tts_instance
     
-    if agent_id and agent_manager.is_instanced(agent_id):
-        emit_knowledge_graph_state(agent_id)
+    project_id = data.get("id")
+    if not project_id:
+        return
+    
+    try:
+        project = project_manager.load_project(project_id)
+        
+        # Restore TTS settings from project
+        tts_settings = project.tts_settings
+        tts_enabled = tts_settings.enabled
+        if tts_instance is None and tts_enabled:
+            tts_instance = get_tts()
+        if tts_instance is not None:
+            if tts_settings.voice:
+                tts_instance.set_voice(tts_settings.voice)
+            tts_instance.set_speed(tts_settings.speed)
+            tts_instance.set_speaker(tts_settings.speaker)
+        
+        emit("project_loaded", {
+            "id": project.id,
+            "name": project.name,
+            "tts_settings": {
+                "enabled": tts_settings.enabled,
+                "voice": tts_settings.voice,
+                "speed": tts_settings.speed,
+                "speaker": tts_settings.speaker,
+            }
+        })
+        emit("agent_graph_state", get_agent_graph_state())
+        # Also emit current TTS settings so UI updates
+        handle_get_tts_settings()
+        socketio.emit("log", {"type": "success", "message": f"Project '{project.name}' loaded"})
+    except FileNotFoundError:
+        emit("error", {"message": f"Project {project_id} not found"})
+    except Exception as e:
+        logger.error(f"Failed to load project: {e}")
+        emit("error", {"message": str(e)})
+
+
+@socketio.on("save_project")
+def handle_save_project():
+    """Save the current project with current TTS settings."""
+    global tts_enabled, tts_instance
+    
+    try:
+        # Update project TTS settings before saving
+        if project_manager.current_project:
+            project_manager.current_project.tts_settings = TTSSettings(
+                enabled=tts_enabled,
+                voice=tts_instance.current_voice_name if tts_instance else None,
+                speed=tts_instance.speed if tts_instance else 1.0,
+                speaker=tts_instance.speaker if tts_instance else 0,
+            )
+        
+        project_manager.save_project()
+        socketio.emit("log", {"type": "success", "message": "Project saved"})
+    except ValueError as e:
+        emit("error", {"message": str(e)})
+
+
+@socketio.on("deploy_project")
+def handle_deploy_project():
+    """Deploy the current project - instantiate all agents and resources."""
+    try:
+        if not project_manager.current_project:
+            emit("error", {"message": "No project loaded"})
+            return
+        
+        runtime.deploy(
+            project_manager.current_project.agent_graph,
+            project_manager.current_project.id
+        )
+        socketio.emit("agent_graph_state", get_agent_graph_state())
+        # Emit agent graph agents list so Agents tab can display them
+        socketio.emit("agent_graph_agents", runtime.get_running_agents())
+        socketio.emit("log", {"type": "success", "message": f"Project deployed: {project_manager.current_project.name}"})
+    except Exception as e:
+        import traceback
+        logger.error(f"Failed to deploy project: {e}\n{traceback.format_exc()}")
+        emit("error", {"message": str(e) or "Unknown error during deployment"})
+
+
+@socketio.on("undeploy_project")
+def handle_undeploy_project():
+    """Undeploy the current project - stop all agents and resources."""
+    try:
+        runtime.undeploy()
+        socketio.emit("agent_graph_state", get_agent_graph_state())
+        # Clear agent graph agents
+        socketio.emit("agent_graph_agents", [])
+        socketio.emit("log", {"type": "success", "message": "Project undeployed"})
+    except Exception as e:
+        logger.error(f"Failed to undeploy project: {e}")
+        emit("error", {"message": str(e)})
+
+
+@socketio.on("stop_project")
+def handle_stop_project():
+    """Stop all nodes and unload the current project."""
+    project_manager.close_project()
+    emit("project_stopped", {})
+    socketio.emit("log", {"type": "info", "message": "Project stopped"})
+
+
+@socketio.on("delete_project")
+def handle_delete_project(data):
+    """Delete a project."""
+    project_id = data.get("id")
+    if not project_id:
+        return
+    
+    project_manager.delete_project(project_id)
+    handle_list_projects()
+    socketio.emit("log", {"type": "warning", "message": f"Project '{project_id}' deleted"})
+
+
+# ==================== Agent Graph Operations ====================
+
+@socketio.on("get_agent_graph_state")
+def handle_get_agent_graph_state():
+    """Get the current agent graph state."""
+    emit("agent_graph_state", get_agent_graph_state())
+    # Also emit agent graph agents so Agents tab displays them
+    emit("agent_graph_agents", runtime.get_running_agents())
+
+
+@socketio.on("get_node_kg_data")
+def handle_get_node_kg_data(data):
+    """Get knowledge graph data for a specific node."""
+    node_id = data.get("node_id")
+    if not node_id or not runtime._current_project_id:
+        return
+    
+    kg = runtime.knowledge_graphs.get(node_id)
+    if kg:
+        kg_dict = kg.to_dict()
+        # Transform to frontend format
+        entities = [
+            {"name": name, "type": props.get("type", "Entity"), "properties": {k: v for k, v in props.items() if k != "type"}}
+            for name, props in kg_dict.get("entities", {}).items()
+        ]
+        relationships = [
+            {"from": r["entity1"], "to": r["entity2"], "type": r.get("type", ""), "properties": {k: v for k, v in r.items() if k not in ("entity1", "entity2", "type")}}
+            for r in kg_dict.get("relationships", [])
+        ]
+        emit("node_kg_data", {"node_id": node_id, "entities": entities, "relationships": relationships})
     else:
-        for agent_info in agent_manager.list_instanced_agents():
-            emit_knowledge_graph_state(agent_info["id"])
+        # Return empty data if KG doesn't exist yet (not deployed)
+        emit("node_kg_data", {"node_id": node_id, "entities": [], "relationships": []})
+
+
+@socketio.on("add_node")
+def handle_add_node(data):
+    """Add a node to the agent graph."""
+    try:
+        node_type = NodeType(data.get("type"))
+        position = Position(
+            x=data.get("x", 0),
+            y=data.get("y", 0)
+        )
+        
+        # Create config based on type
+        config_data = data.get("config", {})
+        if node_type == NodeType.AGENT:
+            config = AgentNodeConfig(**config_data)
+        elif node_type == NodeType.KNOWLEDGE_GRAPH:
+            config = KnowledgeGraphNodeConfig(**config_data)
+        elif node_type == NodeType.MEMORY_STREAM:
+            config = MemoryStreamNodeConfig(**config_data)
+        elif node_type == NodeType.TOOLBOX:
+            config = ToolboxNodeConfig(**config_data)
+        elif node_type == NodeType.USER_INPUT:
+            config = UserInputNodeConfig(**config_data)
+        elif node_type == NodeType.USER_OUTPUT:
+            config = UserOutputNodeConfig(**config_data)
+        elif node_type == NodeType.SCHEDULED_EVENT:
+            config = ScheduledEventNodeConfig(**config_data)
+        else:
+            emit("error", {"message": f"Unknown node type: {node_type}"})
+            return
+        
+        node = Node(
+            type=node_type,
+            position=position,
+            config=config,
+        )
+        
+        if not project_manager.current_project:
+            emit("error", {"message": "No project loaded"})
+            return
+        
+        if runtime.is_deployed:
+            emit("error", {"message": "Cannot add nodes while deployed. Undeploy first."})
+            return
+        
+        project_manager.current_project.agent_graph.add_node(node)
+        project_manager.save_project()
+        emit("agent_graph_state", get_agent_graph_state())
+        socketio.emit("log", {"type": "success", "message": f"Node '{config_data.get('name', node_type.value)}' added"})
+        
+    except ValueError as e:
+        emit("error", {"message": str(e)})
+    except Exception as e:
+        logger.error(f"Failed to add node: {e}")
+        emit("error", {"message": str(e)})
+
+
+@socketio.on("remove_node")
+def handle_remove_node(data):
+    """Remove a node from the agent graph."""
+    node_id = data.get("id")
+    if not node_id:
+        return
+    
+    if not project_manager.current_project:
+        emit("error", {"message": "No project loaded"})
+        return
+    
+    if runtime.is_deployed:
+        emit("error", {"message": "Cannot remove nodes while deployed. Undeploy first."})
+        return
+    
+    project_manager.current_project.agent_graph.remove_node(node_id)
+    project_manager.save_project()
+    emit("agent_graph_state", get_agent_graph_state())
+
+
+@socketio.on("update_node_position")
+def handle_update_node_position(data):
+    """Update a node's position."""
+    node_id = data.get("id")
+    x = data.get("x", 0)
+    y = data.get("y", 0)
+    
+    if node_id and project_manager.current_project:
+        node = project_manager.current_project.agent_graph.get_node(node_id)
+        if node:
+            node.position.x = x
+            node.position.y = y
+            # Don't save on every position update - let frontend batch these
+
+
+@socketio.on("update_node_config")
+def handle_update_node_config(data):
+    """Update a node's configuration."""
+    node_id = data.get("id")
+    config_updates = data.get("config", {})
+    
+    if node_id and config_updates and project_manager.current_project:
+        node = project_manager.current_project.agent_graph.get_node(node_id)
+        if node:
+            for key, value in config_updates.items():
+                if hasattr(node.config, key):
+                    setattr(node.config, key, value)
+            logger.info(f"Updated config for node {node_id}: {config_updates}")
+        project_manager.save_project()
+        emit("agent_graph_state", get_agent_graph_state())
+
+
+@socketio.on("add_edge")
+def handle_add_edge(data):
+    """Add an edge between nodes."""
+    try:
+        if not project_manager.current_project:
+            emit("error", {"message": "No project loaded"})
+            return
+        
+        edge = Edge(
+            source_node=data.get("source_node"),
+            source_port=data.get("source_port"),
+            target_node=data.get("target_node"),
+            target_port=data.get("target_port"),
+            edge_type=EdgeType(data.get("edge_type", "message")),
+        )
+        
+        project_manager.current_project.agent_graph.add_edge(edge)
+        project_manager.save_project()
+        emit("agent_graph_state", get_agent_graph_state())
+        
+    except Exception as e:
+        logger.error(f"Failed to add edge: {e}")
+        emit("error", {"message": str(e)})
+
+
+@socketio.on("remove_edge")
+def handle_remove_edge(data):
+    """Remove an edge from the agent graph."""
+    edge_id = data.get("id")
+    if not edge_id:
+        return
+    
+    if not project_manager.current_project:
+        emit("error", {"message": "No project loaded"})
+        return
+    
+    project_manager.current_project.agent_graph.remove_edge(edge_id)
+    project_manager.save_project()
+    emit("agent_graph_state", get_agent_graph_state())
+
+
+@socketio.on("agent_graph_send_user_message")
+def handle_agent_graph_user_message(data):
+    """Send a user message through the agent graph."""
+    user = data.get("user", "User")
+    content = data.get("message", "")
+    
+    # Echo the user's message
+    emit("chat_message", {
+        "user": user,
+        "message": content,
+        "source": "agent_graph"
+    })
+    
+    def process():
+        responses = runtime.send_user_message(content, user)
+        # Responses are already emitted via on_agent_graph_message callback
+        # but we can log them here
+        for resp in responses:
+            logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
+    
+    socketio.start_background_task(process)
+
+
+# ==================== TTS ====================
+
+@socketio.on("get_tts_settings")
+def handle_get_tts_settings():
+    """Get current TTS settings."""
+    global tts_enabled, tts_instance
+    
+    settings = {
+        "enabled": tts_enabled,
+        "available": PIPER_AVAILABLE,
+        "voice": None,
+        "speed": 1.0,
+        "speaker": 0,
+    }
+    
+    if tts_instance is not None:
+        instance_settings = tts_instance.get_settings()
+        settings.update({
+            "voice": instance_settings.get("voice"),
+            "speed": instance_settings.get("speed", 1.0),
+            "speaker": instance_settings.get("speaker", 0),
+        })
+    
+    emit("tts_settings", settings)
+
+
+@socketio.on("set_tts_settings")
+def handle_set_tts_settings(data):
+    """Update TTS settings."""
+    global tts_enabled, tts_instance
+    
+    if not PIPER_AVAILABLE:
+        emit("error", {"message": "Piper TTS is not available. Install with: pip install piper-tts"})
+        return
+    
+    # Update enabled state
+    if "enabled" in data:
+        tts_enabled = data["enabled"]
+        logger.info(f"TTS {'enabled' if tts_enabled else 'disabled'}")
+        
+        # Initialize TTS instance if enabling and not yet created
+        if tts_enabled and tts_instance is None:
+            tts_instance = get_tts()
+    
+    # Update voice
+    if "voice" in data and tts_instance is not None:
+        voice = data["voice"]
+        if tts_instance.set_voice(voice):
+            logger.info(f"TTS voice set to: {voice}")
+        else:
+            emit("error", {"message": f"Failed to load voice: {voice}"})
+    
+    # Update speed
+    if "speed" in data and tts_instance is not None:
+        tts_instance.set_speed(data["speed"])
+        logger.info(f"TTS speed set to: {data['speed']}")
+    
+    # Update speaker
+    if "speaker" in data and tts_instance is not None:
+        tts_instance.set_speaker(data["speaker"])
+        logger.info(f"TTS speaker set to: {data['speaker']}")
+    
+    # Emit updated settings
+    handle_get_tts_settings()
+
+
+@socketio.on("get_tts_voices")
+def handle_get_tts_voices():
+    """Get list of available TTS voices."""
+    global tts_instance
+    
+    if not PIPER_AVAILABLE:
+        emit("tts_voices", {"voices": [], "error": "Piper TTS not available"})
+        return
+    
+    # Initialize instance if needed
+    if tts_instance is None:
+        tts_instance = get_tts()
+    
+    voices = tts_instance.list_voices()
+    emit("tts_voices", {
+        "voices": [
+            {
+                "key": v.key,
+                "name": v.name,
+                "language": v.language,
+                "quality": v.quality,
+                "downloaded": v.downloaded,
+                "num_speakers": v.num_speakers,
+                "speaker_id_map": v.speaker_id_map,
+            }
+            for v in voices
+        ]
+    })
+
+
+@socketio.on("download_tts_voice")
+def handle_download_tts_voice(data):
+    """Download a TTS voice model."""
+    global tts_instance
+    
+    if not PIPER_AVAILABLE:
+        emit("error", {"message": "Piper TTS not available"})
+        return
+    
+    voice_key = data.get("voice")
+    if not voice_key:
+        emit("error", {"message": "Voice key required"})
+        return
+    
+    if tts_instance is None:
+        tts_instance = get_tts()
+    
+    def do_download():
+        global tts_enabled
+        try:
+            socketio.emit("tts_download_progress", {"voice": voice_key, "status": "downloading"})
+            success = tts_instance.download_voice(voice_key)
+            
+            if success:
+                socketio.emit("tts_download_progress", {"voice": voice_key, "status": "complete"})
+                socketio.emit("log", {"type": "success", "message": f"Voice '{voice_key}' downloaded"})
+                
+                # Auto-select the downloaded voice
+                if tts_instance.set_voice(voice_key):
+                    logger.info(f"Auto-selected voice: {voice_key}")
+                
+                # Refresh voice list
+                voices = tts_instance.list_voices()
+                socketio.emit("tts_voices", {
+                    "voices": [
+                        {
+                            "key": v.key,
+                            "name": v.name,
+                            "language": v.language,
+                            "quality": v.quality,
+                            "downloaded": v.downloaded,
+                            "num_speakers": v.num_speakers,
+                            "speaker_id_map": v.speaker_id_map,
+                        }
+                        for v in voices
+                    ]
+                })
+                
+                # Also emit updated TTS settings with the new voice
+                socketio.emit("tts_settings", {
+                    "enabled": tts_enabled,
+                    "available": PIPER_AVAILABLE,
+                    "voice": tts_instance.current_voice_name,
+                    "speed": tts_instance.speed,
+                    "speaker": tts_instance.speaker,
+                })
+            else:
+                socketio.emit("tts_download_progress", {"voice": voice_key, "status": "failed"})
+                socketio.emit("error", {"message": f"Failed to download voice '{voice_key}'"})
+        except Exception as e:
+            logger.error(f"Voice download failed: {e}")
+            socketio.emit("tts_download_progress", {"voice": voice_key, "status": "failed"})
+            socketio.emit("error", {"message": str(e)})
+    
+    socketio.start_background_task(do_download)
+
+
+# ==================== Voice / STT ====================
+
+# Lazy-loaded voice components
+_transcriber = None
+_audio_buffers = {}  # sid -> AudioBuffer
+
+def get_transcriber():
+    """Get or create the transcriber singleton."""
+    global _transcriber
+    if _transcriber is None:
+        from beezle_bug.voice import Transcriber
+        _transcriber = Transcriber(model_size="small", device="cpu")
+    return _transcriber
+
+
+@socketio.on("audio_start")
+def handle_audio_start(data=None):
+    """Start a new audio recording session."""
+    from beezle_bug.voice.vad import AudioBuffer
+    from flask import request
+    
+    sid = request.sid
+    _audio_buffers[sid] = AudioBuffer(max_duration_seconds=30.0, sample_rate=16000)
+    logger.debug(f"Audio recording started for session {sid}")
+    emit("audio_status", {"status": "recording"})
+
+
+@socketio.on("audio_chunk")
+def handle_audio_chunk(data):
+    """Receive audio chunk from browser."""
+    from flask import request
+    
+    sid = request.sid
+    if sid not in _audio_buffers:
+        logger.warning(f"Received audio chunk for unknown session {sid}")
+        return
+    
+    # data should be bytes or base64
+    if isinstance(data, dict) and "audio" in data:
+        import base64
+        audio_bytes = base64.b64decode(data["audio"])
+    elif isinstance(data, bytes):
+        audio_bytes = data
+    else:
+        logger.warning(f"Invalid audio chunk format: {type(data)}")
+        return
+    
+    _audio_buffers[sid].append(audio_bytes)
+
+
+@socketio.on("audio_end")
+def handle_audio_end(data=None):
+    """End audio recording and transcribe."""
+    from flask import request
+    
+    sid = request.sid
+    if sid not in _audio_buffers:
+        logger.warning(f"No audio buffer for session {sid}")
+        emit("transcription", {"error": "No audio recorded"})
+        return
+    
+    buffer = _audio_buffers.pop(sid)
+    audio_bytes = buffer.get_audio()
+    
+    if len(audio_bytes) < 1000:  # Too short
+        logger.debug("Audio too short, skipping transcription")
+        emit("transcription", {"text": "", "error": "Audio too short"})
+        return
+    
+    def do_transcribe():
+        try:
+            # Add WAV header if raw PCM
+            audio_with_header = _add_wav_header(audio_bytes, sample_rate=16000, channels=1)
+            
+            transcriber = get_transcriber()
+            text = transcriber.transcribe(audio_with_header)
+            
+            logger.info(f"Transcribed: {text[:50]}...")
+            socketio.emit("transcription", {"text": text}, to=sid)
+            
+            # Optionally auto-send to chat
+            auto_send = data.get("auto_send", False) if isinstance(data, dict) else False
+            if auto_send and text.strip():
+                # Emit as user message
+                socketio.emit("chat_message", {
+                    "user": "User",
+                    "message": text,
+                    "source": "voice"
+                })
+                
+                # Process with agent graph or agents
+                if project_manager.current_project and runtime.agents:
+                    responses = runtime.send_user_message(text, "User")
+                    for resp in responses:
+                        logger.debug(f"Voice response from {resp['agent_name']}")
+                        
+        except Exception as e:
+            logger.error(f"Transcription error: {e}")
+            socketio.emit("transcription", {"error": str(e)}, to=sid)
+    
+    socketio.start_background_task(do_transcribe)
+
+
+def _add_wav_header(pcm_data: bytes, sample_rate: int = 16000, channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Add WAV header to raw PCM data."""
+    import struct
+    
+    data_size = len(pcm_data)
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    
+    header = struct.pack(
+        '<4sI4s4sIHHIIHH4sI',
+        b'RIFF',
+        36 + data_size,
+        b'WAVE',
+        b'fmt ',
+        16,  # Subchunk1Size for PCM
+        1,   # AudioFormat (PCM)
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        b'data',
+        data_size
+    )
+    
+    return header + pcm_data
+
+
+# ==================== STT Settings ====================
+
+@socketio.on("get_stt_settings")
+def handle_get_stt_settings():
+    """Get current STT settings from project."""
+    settings = {
+        "enabled": False,
+        "device_id": None,
+        "device_label": None,
+        "wake_words": ["hey beezle", "ok beezle"],
+        "stop_words": ["stop listening", "goodbye", "that's all"],
+        "max_duration": 30.0,
+    }
+    
+    if project_manager.current_project:
+        stt = project_manager.current_project.stt_settings
+        settings = {
+            "enabled": stt.enabled,
+            "device_id": stt.device_id,
+            "device_label": stt.device_label,
+            "wake_words": stt.wake_words,
+            "stop_words": stt.stop_words,
+            "max_duration": stt.max_duration,
+        }
+    
+    emit("stt_settings", settings)
+
+
+@socketio.on("set_stt_settings")
+def handle_set_stt_settings(data):
+    """Update STT settings."""
+    if not project_manager.current_project:
+        emit("error", {"message": "No project loaded"})
+        return
+    
+    stt = project_manager.current_project.stt_settings
+    
+    if "enabled" in data:
+        stt.enabled = data["enabled"]
+        logger.info(f"STT {'enabled' if stt.enabled else 'disabled'}")
+    
+    if "device_id" in data:
+        stt.device_id = data["device_id"]
+    
+    if "device_label" in data:
+        stt.device_label = data["device_label"]
+    
+    if "wake_words" in data:
+        stt.wake_words = data["wake_words"]
+    
+    if "stop_words" in data:
+        stt.stop_words = data["stop_words"]
+    
+    if "max_duration" in data:
+        stt.max_duration = float(data["max_duration"])
+    
+    # Emit updated settings
+    handle_get_stt_settings()
+
+
+# ==================== Continuous STT / Wake Word ====================
+
+# Per-session STT state: sid -> {"state": "idle"|"active", "buffer": AudioBuffer}
+_stt_sessions = {}
+
+
+def _check_wake_word(text: str, wake_words: list) -> tuple[bool, str]:
+    """Check if text starts with any wake word. Returns (matched, remainder)."""
+    text_lower = text.lower().strip()
+    for wake in wake_words:
+        wake_lower = wake.lower().strip()
+        if text_lower.startswith(wake_lower):
+            remainder = text[len(wake):].strip()
+            return True, remainder
+    return False, text
+
+
+def _check_stop_word(text: str, stop_words: list) -> bool:
+    """Check if text contains any stop word."""
+    text_lower = text.lower().strip()
+    for stop in stop_words:
+        if stop.lower().strip() in text_lower:
+            return True
+    return False
+
+
+def _get_stt_max_duration() -> float:
+    """Get max recording duration from project settings, with fallback."""
+    if project_manager.current_project:
+        return project_manager.current_project.stt_settings.max_duration
+    return 30.0  # Default fallback
+
+
+@socketio.on("stt_stream_start")
+def handle_stt_stream_start(data=None):
+    """Start continuous listening session."""
+    from beezle_bug.voice.vad import AudioBuffer
+    from flask import request
+    
+    sid = request.sid
+    max_duration = _get_stt_max_duration()
+    _stt_sessions[sid] = {
+        "state": "idle",
+        "buffer": AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000),
+        "speech_started": False,
+    }
+    logger.debug(f"STT stream started for session {sid} with max_duration={max_duration}s")
+    emit("stt_status", {"state": "idle", "message": "Listening for wake word..."})
+
+
+@socketio.on("stt_stream_chunk")
+def handle_stt_stream_chunk(data):
+    """Receive audio chunk in continuous listening mode."""
+    from flask import request
+    
+    sid = request.sid
+    if sid not in _stt_sessions:
+        logger.warning(f"STT stream chunk received for unknown session {sid}")
+        return
+    
+    session = _stt_sessions[sid]
+    
+    # Decode audio
+    if isinstance(data, dict) and "audio" in data:
+        audio_bytes = base64.b64decode(data["audio"])
+    elif isinstance(data, bytes):
+        audio_bytes = data
+    else:
+        logger.warning(f"Invalid STT stream chunk format: {type(data)}")
+        return
+    
+    # Check for speech using VAD info from frontend
+    speech_detected = data.get("speech", True)
+    
+    if speech_detected:
+        session["buffer"].append(audio_bytes)
+        if not session["speech_started"]:
+            logger.debug("Speech started - buffering audio")
+        session["speech_started"] = True
+    elif session["speech_started"]:
+        # Speech ended - process the segment
+        buffer_size = len(session["buffer"].get_audio())
+        logger.info(f"Speech ended - processing {buffer_size} bytes of audio")
+        _process_speech_segment(sid, session)
+        # Reset buffer for next segment
+        from beezle_bug.voice.vad import AudioBuffer
+        max_duration = _get_stt_max_duration()
+        session["buffer"] = AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000)
+        session["speech_started"] = False
+
+
+def _process_speech_segment(sid: str, session: dict):
+    """Process a completed speech segment - transcribe and check wake/stop words."""
+    audio_bytes = session["buffer"].get_audio()
+    
+    if len(audio_bytes) < 1000:
+        return
+    
+    def do_process():
+        try:
+            audio_with_header = _add_wav_header(audio_bytes, sample_rate=16000, channels=1)
+            transcriber = get_transcriber()
+            text = transcriber.transcribe(audio_with_header)
+            
+            if not text.strip():
+                return
+            
+            logger.debug(f"STT transcribed: {text}")
+            
+            # Get settings
+            stt_settings = None
+            if project_manager.current_project:
+                stt_settings = project_manager.current_project.stt_settings
+            
+            wake_words = stt_settings.wake_words if stt_settings else ["hey beezle"]
+            stop_words = stt_settings.stop_words if stt_settings else ["stop listening"]
+            
+            current_state = session["state"]
+            
+            if current_state == "idle":
+                # Check for wake word
+                matched, remainder = _check_wake_word(text, wake_words)
+                if matched:
+                    session["state"] = "active"
+                    socketio.emit("stt_activated", {}, to=sid)
+                    socketio.emit("stt_status", {"state": "active", "message": "Listening..."}, to=sid)
+                    logger.info(f"Wake word detected, switching to active mode")
+                    
+                    # If there's content after wake word, process it
+                    if remainder:
+                        _send_stt_message(sid, remainder)
+                else:
+                    # Emit what was heard (for debugging/feedback)
+                    socketio.emit("stt_partial", {"text": text}, to=sid)
+            
+            elif current_state == "active":
+                # Check for stop word
+                if _check_stop_word(text, stop_words):
+                    session["state"] = "idle"
+                    socketio.emit("stt_deactivated", {}, to=sid)
+                    socketio.emit("stt_status", {"state": "idle", "message": "Listening for wake word..."}, to=sid)
+                    logger.info(f"Stop word detected, switching to idle mode")
+                else:
+                    # Send as user message
+                    _send_stt_message(sid, text)
+                    
+        except Exception as e:
+            logger.error(f"STT processing error: {e}")
+    
+    socketio.start_background_task(do_process)
+
+
+def _send_stt_message(sid: str, text: str):
+    """Send transcribed text as a user message."""
+    socketio.emit("stt_message", {"text": text}, to=sid)
+    
+    # Also emit as chat message
+    socketio.emit("chat_message", {
+        "user": "User",
+        "message": text,
+        "source": "voice"
+    })
+    
+    # Process with agent graph
+    if project_manager.current_project and runtime.agents:
+        responses = runtime.send_user_message(text, "User")
+        for resp in responses:
+            logger.debug(f"Voice response from {resp['agent_name']}")
+
+
+@socketio.on("stt_stream_stop")
+def handle_stt_stream_stop(data=None):
+    """Stop continuous listening session."""
+    from flask import request
+    
+    sid = request.sid
+    if sid in _stt_sessions:
+        del _stt_sessions[sid]
+        logger.debug(f"STT stream stopped for session {sid}")
+    emit("stt_status", {"state": "stopped", "message": "Listening stopped"})
 
 
 # ==================== Main ====================

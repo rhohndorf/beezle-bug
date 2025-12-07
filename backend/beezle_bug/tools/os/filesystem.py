@@ -6,7 +6,7 @@ from pydantic import Field
 
 from beezle_bug.tools import Tool
 
-base_folder = "dev"
+base_folder = "/app/data"
 
 
 class WriteOperation(Enum):

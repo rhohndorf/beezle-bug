@@ -68,8 +68,8 @@ class Scheduler:
     """
     Manages scheduled tasks for agents.
     
-    The scheduler runs in a background greenlet/thread and triggers agent.tick()
-    based on configured schedules.
+    The scheduler runs in a background greenlet/thread and executes callbacks
+    based on configured schedules (e.g. sending messages to agents).
     """
     
     def __init__(self, tick_interval: float = 1.0):
