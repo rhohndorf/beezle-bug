@@ -110,7 +110,7 @@ const MarkdownComponents = {
   },
 };
 
-export default function Chat({ agentStatus, messages, setMessages, isDeployed = false }) {
+export default function Chat({ agentStatus, messages, setMessages, isDeployed = false, onSendMessage = null }) {
   const [input, setInput] = useState('');
   const [playingMessageId, setPlayingMessageId] = useState(null);
   const messagesEndRef = useRef(null);
@@ -284,16 +284,8 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
     setVoiceState('idle');
   }, []);
 
-  // Auto-play audio for new messages
+  // Track message count (audio now comes via tts_audio event, not in messages)
   useEffect(() => {
-    if (messages.length > lastMessageCountRef.current) {
-      const newMessages = messages.slice(lastMessageCountRef.current);
-      // Find the last message with audio
-      const messageWithAudio = newMessages.reverse().find(m => m.audioUrl);
-      if (messageWithAudio) {
-        playAudio(messageWithAudio.id, messageWithAudio.audioUrl);
-      }
-    }
     lastMessageCountRef.current = messages.length;
   }, [messages]);
 
@@ -308,7 +300,7 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
     // Use URL directly if it's a data URL, otherwise prepend backend URL
     const fullUrl = audioUrl.startsWith('data:') 
       ? audioUrl 
-      : `http://localhost:5000${audioUrl}`;
+      : `http://${window.location.hostname}:5000${audioUrl}`;
     
     const audio = new Audio(fullUrl);
     audioRef.current = audio;
@@ -349,6 +341,8 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
   const sendMessage = (e) => {
     e.preventDefault();
     if (input.trim()) {
+      // Stop any currently playing TTS audio
+      if (onSendMessage) onSendMessage();
       socket.emit('send_message', { user: 'User', message: input });
       setInput('');
     }

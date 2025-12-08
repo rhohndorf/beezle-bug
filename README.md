@@ -10,29 +10,44 @@
 
 - **Visual Node Graph Editor** – Drag-and-drop interface for building agent pipelines
 - **Multi-Agent Orchestration** – Create and connect multiple specialized agents
+- **Tool Calling** – Agents can use tools for knowledge management, web access, filesystem operations, and more
 - **Knowledge Graphs** – Persistent entity-relationship storage for agent memory
 - **Memory Streams** – Observation-based short-term memory for agents
 - **Template System** – Jinja2 templates for agent system prompts
 - **Scheduled Events** – Timer-based autonomous agent triggering
-- **Text-to-Speech** – Integrated Piper TTS with voice selection
+- **Text-to-Speech** – Integrated Piper TTS with voice selection (interruptible on new input)
 - **Voice Input** – Wake word-activated speech-to-text with Whisper
+- **Mobile Web UI** – Dedicated mobile-optimized chat interface at `/mobile` with per-client voice controls
 - **Real-time Introspection** – Watch agent reasoning in real-time
 - **Fully Local or Cloud** – Run entirely on your machine with local LLMs, or connect to remote APIs via LiteLLM
 
 ---
 
+## 📑 Table of Contents
+
+- [Interface Overview](#-interface-overview)
+  - [Desktop App](#desktop-app)
+  - [Mobile App](#mobile-app)
+- [Quick Start](#-quick-start)
+- [Architecture](#️-architecture)
+- [Project Structure](#-project-structure)
+- [Available Tools](#️-available-tools)
+- [Vision & Roadmap](#-vision--roadmap)
+- [License](#-license)
+- [Acknowledgments](#-acknowledgments)
+
+---
+
 ## 📸 Interface Overview
 
-Beezle Bug features a three-column layout with resizable panels:
+### Desktop App
 
-### Interface
+The desktop interface features a three-column layout with resizable panels:
 
 ![Main Interface](imgs/screenshots/main_interface.png)
 *The full Beezle Bug interface showing all panels*
 
----
-
-### 1. Menu Bar
+#### 1. Menu Bar
 
 The top menu bar provides:
 - **Project Selector** – Create, load, and switch between projects
@@ -41,7 +56,7 @@ The top menu bar provides:
 
 ---
 
-### 2. Neural Stream (Left Panel - Top)
+#### 2. Neural Stream (Left Panel - Top)
 
 Real-time introspection of agent activity:
 - **Message events** – When agents receive input
@@ -52,7 +67,7 @@ Real-time introspection of agent activity:
 
 ---
 
-### 3. Log Panel (Left Panel - Bottom)
+#### 3. Log Panel (Left Panel - Bottom)
 
 System logs with color-coded entries:
 - ✅ Success messages (green)
@@ -62,17 +77,17 @@ System logs with color-coded entries:
 
 ---
 
-### 4. Chat Tab (Center Panel)
+#### 4. Chat Tab (Center Panel)
 
 Conversation interface with deployed agents:
 - **Markdown support** – Code blocks, lists, links
-- **Audio playback** – TTS-generated responses
+- **Audio playback** – TTS-generated responses (interruptible when sending new messages)
 - **Voice input indicator** – Shows listening state (idle/active)
 - **User input** – Send messages via text or voice
 
 ---
 
-### 5. Node Graph Tab (Center Panel)
+#### 5. Node Graph Tab (Center Panel)
 
 Visual editor for building agent pipelines:
 
@@ -95,7 +110,7 @@ Visual editor for building agent pipelines:
 
 ---
 
-### 6. Template Editor Tab (Center Panel)
+#### 6. Template Editor Tab (Center Panel)
 
 Edit and manage Jinja2 templates for agent system prompts:
 - **Template list** – All available templates
@@ -113,14 +128,14 @@ Built-in templates include:
 
 ---
 
-### 7. Settings Panel (Right Panel - Top)
+#### 7. Settings Panel (Right Panel - Top)
 
 Tabbed configuration interface:
 
-#### Agents Tab
+##### Agents Tab
 View and manage running agent instances.
 
-#### Node Inspector Tab
+##### Node Inspector Tab
 
 Configure the selected node's properties:
 - Agent: Model, API URL, system template
@@ -130,10 +145,10 @@ Configure the selected node's properties:
 - Scheduled Event: Trigger type, interval, and message content
 - Wait & Combine: Name (rendezvous behavior is automatic)
 
-#### Schedule Tab
+##### Schedule Tab
 View and manage scheduled events.
 
-#### Voice Tab
+##### Voice Tab
 
 **Voice Input (Speech-to-Text):**
 - **Continuous Listening** – Enable/disable wake word detection
@@ -152,13 +167,29 @@ When enabled, the system listens continuously for wake words. Once detected, all
 
 ---
 
-### 8. Knowledge Graph View (in Node Inspector)
+#### 8. Knowledge Graph View (in Node Inspector)
 
 When a Knowledge Graph node is selected, the Node Inspector displays:
 - **Entities** – Named objects with types and properties
 - **Relationships** – Connections between entities
 - **Real-time updates** – Watch the graph grow as agents learn
 - **Selection details** – Click to view entity/relationship properties
+
+---
+
+### Mobile App
+
+A streamlined mobile-optimized interface for on-the-go interaction with your agents.
+
+**Demo:** [Watch the mobile UI demo](https://youtube.com/shorts/uuKadVtSTFg?feature=share)
+
+Access the mobile interface at `http://your-server:5173/mobile`
+
+**Features:**
+- **Full-screen chat** – Distraction-free conversation view
+- **Per-client voice controls** – Independent TTS and STT toggles (separate from desktop settings)
+- **Touch-optimized** – Large touch targets and safe area support for notched phones
+
 
 ---
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { socket } from './lib/socket';
 import Chat from './components/Chat';
 import NodeGraph from './components/NodeGraph';
@@ -7,9 +8,10 @@ import IntrospectionPanel from './components/IntrospectionPanel';
 import SettingsPanel from './components/SettingsPanel';
 import LogPanel from './components/LogPanel';
 import ProjectMenuBar from './components/ProjectMenuBar';
+import MobileChat from './components/MobileChat';
 import { Activity, MessageSquare, GitBranch, FileText } from 'lucide-react';
 
-function App() {
+function DesktopApp() {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [agentStatus, setAgentStatus] = useState({ running: false, name: 'Beezle Bug' });
   const [activeTab, setActiveTab] = useState('chat');
@@ -25,6 +27,9 @@ function App() {
   const [selectedAgentGraphNode, setSelectedAgentGraphNode] = useState(null);
   const [isAgentGraphDeployed, setIsAgentGraphDeployed] = useState(false);
   const wasDeployedRef = useRef(false);
+  
+  // TTS audio ref for stopping playback
+  const ttsAudioRef = useRef(null);
   
   // Layout State
   const [leftWidth, setLeftWidth] = useState(550);
@@ -79,6 +84,20 @@ function App() {
       };
       setChatMessages(prev => [...prev, newMessage]);
     }
+    
+    function onTtsAudio(data) {
+      // Play audio directly when received (per-client TTS)
+      if (data.audioUrl) {
+        // Stop any currently playing audio first
+        if (ttsAudioRef.current) {
+          ttsAudioRef.current.pause();
+        }
+        const audio = new Audio(data.audioUrl);
+        ttsAudioRef.current = audio;
+        audio.onended = () => { ttsAudioRef.current = null; };
+        audio.play().catch(err => console.error('Failed to play TTS audio:', err));
+      }
+    }
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -87,6 +106,7 @@ function App() {
     socket.on('project_loaded', onProjectLoaded);
     socket.on('project_stopped', onProjectStopped);
     socket.on('chat_message', onChatMessage);
+    socket.on('tts_audio', onTtsAudio);
     socket.connect();
 
     return () => {
@@ -97,6 +117,7 @@ function App() {
       socket.off('project_loaded', onProjectLoaded);
       socket.off('project_stopped', onProjectStopped);
       socket.off('chat_message', onChatMessage);
+      socket.off('tts_audio', onTtsAudio);
       socket.disconnect();
     };
   }, []);
@@ -205,7 +226,7 @@ function App() {
 
           {/* Tab Content */}
           <div className="flex-1 overflow-hidden">
-            {activeTab === 'chat' && <Chat agentStatus={agentStatus} messages={chatMessages} setMessages={setChatMessages} isDeployed={isAgentGraphDeployed} />}
+            {activeTab === 'chat' && <Chat agentStatus={agentStatus} messages={chatMessages} setMessages={setChatMessages} isDeployed={isAgentGraphDeployed} onSendMessage={() => { if (ttsAudioRef.current) { ttsAudioRef.current.pause(); ttsAudioRef.current = null; } }} />}
             {activeTab === 'nodes' && <NodeGraph onSelectNode={setSelectedAgentGraphNode} />}
             {activeTab === 'templates' && <TemplateEditorTab />}
           </div>
@@ -228,6 +249,17 @@ function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<DesktopApp />} />
+        <Route path="/mobile" element={<MobileChat />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
