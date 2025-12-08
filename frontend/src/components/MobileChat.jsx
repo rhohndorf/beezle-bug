@@ -84,6 +84,12 @@ export default function MobileChat() {
     }
     
     function onChatMessage(data) {
+      // Stop TTS audio when user message arrives (typed or voice)
+      if (data.user === 'User' && audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      
       const newMessage = { 
         id: Date.now(), 
         user: data.user, 
