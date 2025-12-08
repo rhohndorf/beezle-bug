@@ -85,10 +85,10 @@ Visual editor for building agent pipelines:
 | 💬 **User Chat** | Input from the user interface |
 | 🖥️ **User Display** | Output to the chat interface |
 | ⏰ **Scheduled Event** | Timer trigger for autonomous operation |
+| 🔀 **Wait & Combine** | Rendezvous point that waits for all inputs before forwarding |
 
 **Connection Types:**
-- **Message** (blue) – Agent-to-agent communication
-- **Trigger** (yellow) – Event triggering
+- **Message** (blue) – Agent-to-agent or event-to-agent communication
 - **Pipeline** (green) – Data flow
 - **Resource** (purple, dashed) – Shared resources
 - **Delegate** (orange, dashed) – Task delegation
@@ -127,7 +127,8 @@ Configure the selected node's properties:
 - Knowledge Graph: Name
 - Memory Stream: Max observations
 - Toolbox: Available tools
-- Scheduled Event: Trigger type and interval
+- Scheduled Event: Trigger type, interval, and message content
+- Wait & Combine: Name (rendezvous behavior is automatic)
 
 #### Schedule Tab
 View and manage scheduled events.
@@ -190,7 +191,7 @@ docker compose up -d
    - Add a **User Chat** node
    - Add a **User Display** node
 3. **Connect Nodes** – Drag from output ports to input ports
-   - User Chat → Agent (trigger)
+   - User Chat → Agent (message)
    - Agent → User Display (message)
 4. **Configure Agent** – Select the agent node and configure:
    - API URL: Your LLM endpoint (e.g., `http://127.0.0.1:1234/v1`)
@@ -298,5 +299,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Tad Williams for the [Otherland](https://en.wikipedia.org/wiki/Otherland) series
 - [Piper TTS](https://github.com/rhasspy/piper) for local text-to-speech
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for speech recognition
+- [LiteLLM](https://github.com/BerriAI/litellm) for unified LLM API access
 - [React Flow](https://reactflow.dev/) inspiration for the node graph
 - The open-source AI community
