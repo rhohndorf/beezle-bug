@@ -76,6 +76,12 @@ function DesktopApp() {
     }
 
     function onChatMessage(data) {
+      // Stop TTS audio when user message arrives (typed or voice)
+      if (data.user === 'User' && ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current = null;
+      }
+      
       const newMessage = { 
         id: Date.now(), 
         user: data.user, 
