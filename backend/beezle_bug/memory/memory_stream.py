@@ -11,7 +11,8 @@ class MemoryStream:
     def __init__(self) -> None:
         self.memories: List[Observation] = []
         self.last_reflection_point = 0
-        self.embedding_model = TextEmbedding()
+        # Use persistent cache directory
+        self.embedding_model = TextEmbedding(cache_dir="/cache/fastembed")
 
     def add(self, content: Message|ToolCallResult) -> None:
         embedding = list(self.embedding_model.query_embed(content.json()))[0]

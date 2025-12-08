@@ -65,6 +65,9 @@ template_loader = TemplateLoader(DATA_DIR)
 tts_enabled = False
 tts_instance: PiperTTS = None
 
+# Per-session client preferences
+_client_preferences = {}  # sid -> {"tts_enabled": bool}
+
 
 def event_handler(event):
     """Forward agent events to connected clients."""
@@ -77,32 +80,18 @@ def event_handler(event):
 
 # Initialize Storage, Runtime, and ProjectManager
 def on_agent_graph_message(agent_id: str, agent_name: str, message: str):
-    """Callback for agent graph messages - emits to all connected clients."""
-    global tts_enabled, tts_instance
+    """Callback for agent graph messages from scheduled events etc.
     
+    For user-initiated messages, responses are handled directly in handle_message
+    with per-client TTS preferences. This callback handles non-user-initiated
+    messages (scheduled events, etc.) and broadcasts text-only to all clients.
+    """
     msg_data = {
         "agentId": agent_id,
         "user": agent_name,
         "message": message,
         "source": "agent_graph"
     }
-    
-    # Generate TTS audio if enabled
-    if tts_enabled and tts_instance is not None:
-        try:
-            if tts_instance.voice is None:
-                logger.warning("TTS enabled but no voice loaded")
-            else:
-                audio_bytes = tts_instance.synthesize(message)
-                if audio_bytes:
-                    # Send as base64 data URL - no disk write needed
-                    audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-                    msg_data["audioUrl"] = f"data:audio/wav;base64,{audio_b64}"
-                    logger.info(f"Generated TTS audio: {len(audio_bytes)} bytes")
-                else:
-                    logger.warning("TTS synthesis returned no audio")
-        except Exception as e:
-            logger.error(f"TTS synthesis failed: {e}")
     
     socketio.emit("chat_message", msg_data)
 
@@ -179,7 +168,10 @@ def handle_connect():
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    logger.info("Client disconnected")
+    from flask import request
+    sid = request.sid
+    _client_preferences.pop(sid, None)
+    logger.info(f"Client disconnected: {sid}")
 
 
 # ==================== Tools & Templates ====================
@@ -271,8 +263,11 @@ def handle_delete_template(data):
 @socketio.on("send_message")
 def handle_message(data):
     """Handle chat messages from users."""
-    logger.info(f"Message: {data}")
-    emit("chat_message", data)
+    from flask import request
+    sid = request.sid
+    
+    logger.info(f"Message from {sid}: {data}")
+    emit("chat_message", data)  # Echo user message to sender
     
     user = data.get("user", "User")
     message = data.get("message", "")
@@ -281,9 +276,28 @@ def handle_message(data):
     # If an agent graph project is active, route through it
     if project_manager.current_project and runtime.agents:
         def process_agent_graph():
+            global tts_instance
+            
             responses = runtime.send_user_message(message, user)
+            # Text is broadcast to all via on_agent_graph_message callback
+            # Here we only handle audio for the requesting client
+            
             for resp in responses:
-                logger.debug(f"Agent graph response from {resp['agent_name']}")
+                logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
+                
+                # Check this client's TTS preference (per-client only, no global check)
+                prefs = _client_preferences.get(sid, {})
+                if prefs.get("tts_enabled") and tts_instance is not None:
+                    try:
+                        audio_bytes = tts_instance.synthesize(resp["response"])
+                        if audio_bytes:
+                            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                            socketio.emit("tts_audio", {
+                                "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                            }, room=sid)
+                            logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
+                    except Exception as e:
+                        logger.error(f"TTS synthesis failed: {e}")
         
         socketio.start_background_task(process_agent_graph)
         return
@@ -671,6 +685,9 @@ def handle_remove_edge(data):
 @socketio.on("agent_graph_send_user_message")
 def handle_agent_graph_user_message(data):
     """Send a user message through the agent graph."""
+    from flask import request
+    sid = request.sid
+    
     user = data.get("user", "User")
     content = data.get("message", "")
     
@@ -682,11 +699,28 @@ def handle_agent_graph_user_message(data):
     })
     
     def process():
+        global tts_instance
+        
         responses = runtime.send_user_message(content, user)
-        # Responses are already emitted via on_agent_graph_message callback
-        # but we can log them here
+        # Text is broadcast to all via on_agent_graph_message callback
+        # Here we only handle audio for the requesting client
+        
         for resp in responses:
             logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
+            
+            # Check this client's TTS preference (per-client only, no global check)
+            prefs = _client_preferences.get(sid, {})
+            if prefs.get("tts_enabled") and tts_instance is not None:
+                try:
+                    audio_bytes = tts_instance.synthesize(resp["response"])
+                    if audio_bytes:
+                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                        socketio.emit("tts_audio", {
+                            "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                        }, room=sid)
+                        logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
+                except Exception as e:
+                    logger.error(f"TTS synthesis failed: {e}")
     
     socketio.start_background_task(process)
 
@@ -717,10 +751,33 @@ def handle_get_tts_settings():
     emit("tts_settings", settings)
 
 
+@socketio.on("set_tts_enabled")
+def handle_set_tts_enabled(data):
+    """Set per-client TTS preference."""
+    global tts_instance
+    from flask import request
+    sid = request.sid
+    enabled = data.get("enabled", False)
+    
+    if sid not in _client_preferences:
+        _client_preferences[sid] = {}
+    _client_preferences[sid]["tts_enabled"] = enabled
+    
+    # Initialize TTS instance if enabling and not yet created
+    if enabled and tts_instance is None:
+        tts_instance = get_tts()
+        logger.info("TTS instance initialized on first client enable")
+    
+    logger.info(f"Client {sid} TTS preference: {enabled}")
+    emit("tts_preference_updated", {"enabled": enabled})
+
+
 @socketio.on("set_tts_settings")
 def handle_set_tts_settings(data):
     """Update TTS settings."""
     global tts_enabled, tts_instance
+    from flask import request
+    sid = request.sid
     
     if not PIPER_AVAILABLE:
         emit("error", {"message": "Piper TTS is not available. Install with: pip install piper-tts"})
@@ -730,6 +787,11 @@ def handle_set_tts_settings(data):
     if "enabled" in data:
         tts_enabled = data["enabled"]
         logger.info(f"TTS {'enabled' if tts_enabled else 'disabled'}")
+        
+        # Also set this client's per-client TTS preference
+        if sid not in _client_preferences:
+            _client_preferences[sid] = {}
+        _client_preferences[sid]["tts_enabled"] = data["enabled"]
         
         # Initialize TTS instance if enabling and not yet created
         if tts_enabled and tts_instance is None:
@@ -937,7 +999,7 @@ def handle_audio_end(data=None):
             # Optionally auto-send to chat
             auto_send = data.get("auto_send", False) if isinstance(data, dict) else False
             if auto_send and text.strip():
-                # Emit as user message
+                # Emit as user message (to all - will be seen by all clients)
                 socketio.emit("chat_message", {
                     "user": "User",
                     "message": text,
@@ -945,10 +1007,26 @@ def handle_audio_end(data=None):
                 })
                 
                 # Process with agent graph or agents
+                # Text responses are broadcast via on_agent_graph_message callback
+                # Here we only handle audio for the requesting client
                 if project_manager.current_project and runtime.agents:
                     responses = runtime.send_user_message(text, "User")
                     for resp in responses:
-                        logger.debug(f"Voice response from {resp['agent_name']}")
+                        logger.debug(f"Voice response from {resp['agent_name']}: {resp['response'][:50]}...")
+                        
+                        # Check this client's TTS preference (per-client only)
+                        prefs = _client_preferences.get(sid, {})
+                        if prefs.get("tts_enabled") and tts_instance is not None:
+                            try:
+                                audio_bytes_tts = tts_instance.synthesize(resp["response"])
+                                if audio_bytes_tts:
+                                    audio_b64 = base64.b64encode(audio_bytes_tts).decode('utf-8')
+                                    socketio.emit("tts_audio", {
+                                        "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                                    }, room=sid)
+                                    logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes_tts)} bytes")
+                            except Exception as tts_e:
+                                logger.error(f"TTS synthesis failed: {tts_e}")
                         
         except Exception as e:
             logger.error(f"Transcription error: {e}")
@@ -1011,6 +1089,20 @@ def handle_get_stt_settings():
         }
     
     emit("stt_settings", settings)
+
+
+@socketio.on("set_stt_enabled")
+def handle_set_stt_enabled(data):
+    """Set per-client STT preference."""
+    from flask import request
+    sid = request.sid
+    enabled = data.get("enabled", False)
+    
+    if sid not in _client_preferences:
+        _client_preferences[sid] = {}
+    _client_preferences[sid]["stt_enabled"] = enabled
+    
+    logger.info(f"Client {sid} STT preference: {enabled}")
 
 
 @socketio.on("set_stt_settings")
@@ -1099,11 +1191,19 @@ def handle_stt_stream_start(data=None):
 def handle_stt_stream_chunk(data):
     """Receive audio chunk in continuous listening mode."""
     from flask import request
+    from beezle_bug.voice.vad import AudioBuffer
     
     sid = request.sid
+    
+    # Auto-create session if it doesn't exist (handles race condition with stt_stream_start)
     if sid not in _stt_sessions:
-        logger.warning(f"STT stream chunk received for unknown session {sid}")
-        return
+        max_duration = _get_stt_max_duration()
+        _stt_sessions[sid] = {
+            "state": "idle",
+            "buffer": AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000),
+            "speech_started": False,
+        }
+        logger.debug(f"STT session auto-created for {sid}")
     
     session = _stt_sessions[sid]
     
@@ -1199,9 +1299,11 @@ def _process_speech_segment(sid: str, session: dict):
 
 def _send_stt_message(sid: str, text: str):
     """Send transcribed text as a user message."""
+    global tts_instance
+    
     socketio.emit("stt_message", {"text": text}, to=sid)
     
-    # Also emit as chat message
+    # Emit as chat message to all clients
     socketio.emit("chat_message", {
         "user": "User",
         "message": text,
@@ -1209,10 +1311,26 @@ def _send_stt_message(sid: str, text: str):
     })
     
     # Process with agent graph
+    # Text responses are broadcast via on_agent_graph_message callback
+    # Here we only handle audio for the requesting client
     if project_manager.current_project and runtime.agents:
         responses = runtime.send_user_message(text, "User")
         for resp in responses:
-            logger.debug(f"Voice response from {resp['agent_name']}")
+            logger.debug(f"Voice response from {resp['agent_name']}: {resp['response'][:50]}...")
+            
+            # Check this client's TTS preference (per-client only)
+            prefs = _client_preferences.get(sid, {})
+            if prefs.get("tts_enabled") and tts_instance is not None:
+                try:
+                    audio_bytes = tts_instance.synthesize(resp["response"])
+                    if audio_bytes:
+                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                        socketio.emit("tts_audio", {
+                            "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                        }, room=sid)
+                        logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
+                except Exception as e:
+                    logger.error(f"TTS synthesis failed: {e}")
 
 
 @socketio.on("stt_stream_stop")
