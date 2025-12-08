@@ -59,5 +59,11 @@ class Node(BaseModel):
                 "outputs": ["message_out"],
                 "bidirectional": [],
             }
+        elif self.type == NodeType.WAIT_AND_COMBINE:
+            return {
+                "inputs": ["message_in"],
+                "outputs": ["message_out"],
+                "bidirectional": [],
+            }
         return {"inputs": [], "outputs": [], "bidirectional": []}
 

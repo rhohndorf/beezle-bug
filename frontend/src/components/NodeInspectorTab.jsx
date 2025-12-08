@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../lib/socket';
-import { Bot, Brain, Database, MessageCircle, Monitor, Wrench, Clock, Box, Share2, X } from 'lucide-react';
+import { Bot, Brain, Database, MessageCircle, Monitor, Wrench, Clock, Box, Share2, X, GitMerge } from 'lucide-react';
 
 const NODE_ICONS = {
   agent: Bot,
@@ -10,6 +10,7 @@ const NODE_ICONS = {
   user_input: MessageCircle,
   user_output: Monitor,
   scheduled_event: Clock,
+  wait_and_combine: GitMerge,
 };
 
 const NODE_COLORS = {
@@ -20,6 +21,7 @@ const NODE_COLORS = {
   user_input: '#eab308',
   user_output: '#ef4444',
   scheduled_event: '#06b6d4',
+  wait_and_combine: '#ec4899',
 };
 
 // Knowledge Graph display component
@@ -551,6 +553,23 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
 
             <div className="text-xs text-[#555] p-3 bg-[#1a1a1a] rounded border border-[#2b2b2b]">
               Connect the <span className="text-[#06b6d4]">message_out</span> port to an <span className="text-[#3b82f6]">Agent's</span> <span className="text-[#3b82f6]">message_in</span> port to schedule message delivery.
+            </div>
+          </>
+        )}
+
+        {/* Wait and Combine config */}
+        {selectedNode.type === 'wait_and_combine' && (
+          <>
+            <div className="text-xs text-[#555] p-3 bg-[#1a1a1a] rounded border border-[#2b2b2b]">
+              <p className="mb-2">
+                <strong className="text-[#ec4899]">Rendezvous Point</strong>
+              </p>
+              <p className="mb-2">
+                This node waits for messages from <strong>all</strong> connected senders before forwarding them as a combined batch.
+              </p>
+              <p>
+                Connect multiple <span className="text-[#3b82f6]">message_out</span> ports to this node's <span className="text-[#ec4899]">message_in</span>, then connect <span className="text-[#ec4899]">message_out</span> to an <span className="text-[#3b82f6]">Agent</span> to receive the combined messages.
+              </p>
             </div>
           </>
         )}

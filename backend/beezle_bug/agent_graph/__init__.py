@@ -13,6 +13,7 @@ from .types import (
     UserInputNodeConfig,
     UserOutputNodeConfig,
     ScheduledEventNodeConfig,
+    WaitAndCombineNodeConfig,
     NodeConfig,
 )
 from .node import Node
@@ -32,6 +33,7 @@ __all__ = [
     "UserInputNodeConfig",
     "UserOutputNodeConfig",
     "ScheduledEventNodeConfig",
+    "WaitAndCombineNodeConfig",
     "NodeConfig",
     # Core classes
     "Node",

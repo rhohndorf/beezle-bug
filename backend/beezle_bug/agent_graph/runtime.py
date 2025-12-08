@@ -7,9 +7,10 @@ Responsibilities:
 - Route messages between connected nodes
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any, Callable
+from typing import Optional, Any, Callable, List, Dict
 from loguru import logger
 
 from .types import NodeType, EdgeType
@@ -27,6 +28,14 @@ from beezle_bug.tools.toolbox_factory import ToolboxFactory
 from beezle_bug.tools import Tool
 from beezle_bug.llm_adapter import OpenAiAdapter
 from beezle_bug.storage import StorageService
+
+
+@dataclass
+class WaitAndCombineState:
+    """Runtime state for a WaitAndCombine node."""
+    expected_senders: set[str] = field(default_factory=set)  # Node IDs of expected senders
+    senders_received: set[str] = field(default_factory=set)  # Node IDs that have sent
+    pending_messages: List[Dict[str, str]] = field(default_factory=list)  # Accumulated messages
 
 
 def create_delegate_tool(agents_dict: dict, target_node_id: str, target_name: str, source_name: str) -> type[Tool]:
@@ -53,8 +62,12 @@ def create_delegate_tool(agents_dict: dict, target_node_id: str, target_name: st
             target_agent = agents_dict.get(target_node_id)
             if not target_agent:
                 return f"Error: Agent '{target_name}' is not available"
-            response = target_agent.process_message(source_name, self.question)
-            return response if response else "No response from agent"
+            # Use list-based message format
+            messages = [{"sender": source_name, "content": self.question}]
+            response_messages = target_agent.process_message(messages)
+            if response_messages:
+                return response_messages[0]["content"]
+            return "No response from agent"
     
     DelegateTool.__name__ = tool_name
     DelegateTool.__doc__ = f"Ask {target_name} a question and get their response. Use this when you need {target_name}'s expertise or input."
@@ -91,6 +104,7 @@ class AgentGraphRuntime:
         self.knowledge_graphs: dict[str, KnowledgeGraph] = {}
         self.memory_streams: dict[str, MemoryStream] = {}
         self.toolboxes: dict[str, list[str]] = {}
+        self.wait_and_combine_states: dict[str, WaitAndCombineState] = {}
 
         # Subscribe to events for message routing
         self.event_bus.subscribe(EventType.MESSAGE_SENT, self._on_agent_message)
@@ -135,6 +149,7 @@ class AgentGraphRuntime:
         self.knowledge_graphs.clear()
         self.memory_streams.clear()
         self.toolboxes.clear()
+        self.wait_and_combine_states.clear()
 
         self._current_agent_graph = None
         self._current_project_id = None
@@ -163,6 +178,11 @@ class AgentGraphRuntime:
         for node in agent_graph.nodes:
             if node.type == NodeType.SCHEDULED_EVENT:
                 self._start_scheduled_event_node(node, agent_graph)
+
+        # Fourth pass: create WaitAndCombine nodes (which can connect from/to agents)
+        for node in agent_graph.nodes:
+            if node.type == NodeType.WAIT_AND_COMBINE:
+                self._create_wait_and_combine_node(node, agent_graph)
 
     def _create_kg_node(self, node: Node) -> KnowledgeGraph:
         """Create a Knowledge Graph instance for a node."""
@@ -298,7 +318,7 @@ class AgentGraphRuntime:
             logger.info(f"Stopped agent node: {node_id}")
 
     def _start_scheduled_event_node(self, node: Node, agent_graph: AgentGraph) -> None:
-        """Start a Scheduled Event node that sends messages to connected agents."""
+        """Start a Scheduled Event node that sends messages to connected nodes."""
         config = node.config if isinstance(node.config, dict) else node.config.model_dump()
         name = config.get("name", "Scheduled Event")
         trigger_type = config.get("trigger_type", "interval")
@@ -306,36 +326,46 @@ class AgentGraphRuntime:
         interval_seconds = config.get("interval_seconds", 30)
         message_content = config.get("message_content", "Review your current state and pending tasks.")
 
-        # Find connected agents via MESSAGE edges from message_out port
-        target_agent_ids = []
+        # Find connected targets (agents or WaitAndCombine) via MESSAGE edges from message_out port
+        target_info: List[Dict[str, Any]] = []  # [{node_id, node_type}, ...]
         for edge in agent_graph.get_edges_for_node(node.id):
             if edge.edge_type != EdgeType.MESSAGE:
                 continue
             if edge.source_node != node.id or edge.source_port != "message_out":
                 continue
             target_node = agent_graph.get_node(edge.target_node)
-            if target_node and target_node.type == NodeType.AGENT:
-                target_agent_ids.append(edge.target_node)
+            if target_node and target_node.type in (NodeType.AGENT, NodeType.WAIT_AND_COMBINE):
+                target_info.append({"node_id": edge.target_node, "node_type": target_node.type})
 
-        if not target_agent_ids:
-            logger.warning(f"Scheduled Event '{name}' ({node.id}) has no connected agents")
+        if not target_info:
+            logger.warning(f"Scheduled Event '{name}' ({node.id}) has no connected targets")
             return
 
         task_id = f"{node.id}_scheduled"
+        scheduled_event_node_id = node.id
 
-        def scheduled_tick(agent_ids=target_agent_ids, event_name=name, content=message_content):
-            for agent_id in agent_ids:
-                agent = self.agents.get(agent_id)
-                if agent:
-                    agent_node = agent_graph.get_node(agent_id)
-                    agent_name = "Agent"
-                    if agent_node:
-                        agent_config = agent_node.config if isinstance(agent_node.config, dict) else agent_node.config.model_dump()
-                        agent_name = agent_config.get("name", "Agent")
+        def scheduled_tick(targets=target_info, event_name=name, content=message_content):
+            messages = [{"sender": event_name, "content": content}]
+            
+            for target in targets:
+                target_id = target["node_id"]
+                target_type = target["node_type"]
+                
+                if target_type == NodeType.AGENT:
+                    agent = self.agents.get(target_id)
+                    if agent:
+                        target_node = agent_graph.get_node(target_id)
+                        agent_name = "Agent"
+                        if target_node:
+                            agent_config = target_node.config if isinstance(target_node.config, dict) else target_node.config.model_dump()
+                            agent_name = agent_config.get("name", "Agent")
 
-                    response = agent.process_message(event_name, content)
-                    if response:
-                        self._route_agent_response(agent_id, agent_name, response)
+                        response_messages = agent.process_message(messages)
+                        if response_messages:
+                            self._route_messages(target_id, agent_name, response_messages)
+                
+                elif target_type == NodeType.WAIT_AND_COMBINE:
+                    self._deliver_to_wait_and_combine(target_id, scheduled_event_node_id, messages)
 
         if trigger_type == "once":
             if not run_at_str:
@@ -368,39 +398,105 @@ class AgentGraphRuntime:
         self.scheduler.cancel_task(task_id)
         logger.info(f"Stopped scheduled event node: {node_id}")
 
+    def _create_wait_and_combine_node(self, node: Node, agent_graph: AgentGraph) -> None:
+        """Create a WaitAndCombine node that collects messages from multiple senders."""
+        config = node.config if isinstance(node.config, dict) else node.config.model_dump()
+        name = config.get("name", "Wait and Combine")
+
+        # Find all nodes that send to this node's message_in port
+        expected_senders: set[str] = set()
+        for edge in agent_graph.get_edges_for_node(node.id):
+            if edge.edge_type != EdgeType.MESSAGE:
+                continue
+            if edge.target_node != node.id or edge.target_port != "message_in":
+                continue
+            expected_senders.add(edge.source_node)
+
+        if not expected_senders:
+            logger.warning(f"WaitAndCombine '{name}' ({node.id}) has no incoming connections")
+
+        # Initialize state
+        self.wait_and_combine_states[node.id] = WaitAndCombineState(
+            expected_senders=expected_senders,
+            senders_received=set(),
+            pending_messages=[],
+        )
+        logger.info(f"Created WaitAndCombine node: {name} ({node.id}) expecting {len(expected_senders)} senders")
+
+    def _deliver_to_wait_and_combine(
+        self, 
+        node_id: str, 
+        sender_node_id: str, 
+        messages: List[Dict[str, str]]
+    ) -> None:
+        """
+        Deliver messages to a WaitAndCombine node.
+        
+        If all expected senders have sent, forwards combined messages to connected nodes.
+        """
+        state = self.wait_and_combine_states.get(node_id)
+        if not state:
+            logger.warning(f"WaitAndCombine state not found for node {node_id}")
+            return
+
+        # Add messages and mark sender as received
+        state.pending_messages.extend(messages)
+        state.senders_received.add(sender_node_id)
+
+        node = self._current_agent_graph.get_node(node_id)
+        config = node.config if isinstance(node.config, dict) else node.config.model_dump()
+        name = config.get("name", "Wait and Combine")
+
+        logger.debug(
+            f"WaitAndCombine '{name}': received from {sender_node_id}, "
+            f"have {len(state.senders_received)}/{len(state.expected_senders)} senders"
+        )
+
+        # Check if all expected senders have sent
+        if state.senders_received >= state.expected_senders:
+            # All senders have sent - forward combined messages
+            combined_messages = state.pending_messages.copy()
+            
+            # Reset state for next cycle
+            state.senders_received.clear()
+            state.pending_messages.clear()
+
+            logger.info(
+                f"WaitAndCombine '{name}': forwarding {len(combined_messages)} messages"
+            )
+
+            # Route combined messages to targets
+            self._route_messages(node_id, name, combined_messages)
+
     # === Message Routing ===
 
     def _on_agent_message(self, event: Any) -> None:
-        """Handle message events from agents."""
-        if not self._current_agent_graph:
-            return
-
-        source_agent_id = event.data.get("agent_id")
-        if not source_agent_id:
-            return
-
-        for edge in self._current_agent_graph.edges:
-            if edge.source_node != source_agent_id:
-                continue
-            if edge.edge_type not in (EdgeType.MESSAGE, EdgeType.PIPELINE):
-                continue
-
-            target_agent = self.agents.get(edge.target_node)
-            if target_agent:
-                logger.debug(f"Routing message {source_agent_id} -> {edge.target_node}")
-                target_agent.receive_message(event.data.get("content", ""))
+        """Handle message events from agents (legacy event handler)."""
+        pass  # No longer used - messages are routed via _route_messages
 
     def _on_agent_response(self, event: Any) -> None:
-        """Handle response events from agents."""
-        pass
+        """Handle response events from agents (legacy event handler)."""
+        pass  # No longer used - messages are routed via _route_messages
 
-    def _route_agent_response(self, agent_id: str, agent_name: str, response: str) -> None:
-        """Route an agent's response through the graph to connected nodes."""
-        if not self._current_agent_graph:
+    def _route_messages(
+        self, 
+        source_node_id: str, 
+        source_name: str, 
+        messages: List[Dict[str, str]]
+    ) -> None:
+        """
+        Route messages through the graph to connected nodes.
+        
+        Args:
+            source_node_id: ID of the node sending the messages
+            source_name: Display name of the source (for logging/attribution)
+            messages: List of message dicts with "sender" and "content" keys
+        """
+        if not self._current_agent_graph or not messages:
             return
 
         for edge in self._current_agent_graph.edges:
-            if edge.source_node != agent_id:
+            if edge.source_node != source_node_id:
                 continue
             if edge.source_port != "message_out":
                 continue
@@ -410,22 +506,29 @@ class AgentGraphRuntime:
                 continue
 
             if target_node.type == NodeType.USER_OUTPUT:
+                # Send each message to user output
                 if self.on_agent_graph_message:
-                    self.on_agent_graph_message(agent_id, agent_name, response)
+                    for msg in messages:
+                        self.on_agent_graph_message(source_node_id, msg["sender"], msg["content"])
+
             elif target_node.type == NodeType.AGENT:
                 target_agent = self.agents.get(edge.target_node)
                 if target_agent:
                     target_config = target_node.config if isinstance(target_node.config, dict) else target_node.config.model_dump()
                     target_name = target_config.get("name", "Agent")
 
-                    logger.debug(f"Forwarding message from {agent_name} to {target_name}")
-                    target_response = target_agent.process_message(agent_name, response)
+                    logger.debug(f"Forwarding {len(messages)} message(s) from {source_name} to {target_name}")
+                    response_messages = target_agent.process_message(messages)
 
-                    if target_response:
-                        self._route_agent_response(edge.target_node, target_name, target_response)
+                    if response_messages:
+                        self._route_messages(edge.target_node, target_name, response_messages)
+
+            elif target_node.type == NodeType.WAIT_AND_COMBINE:
+                # Deliver to WaitAndCombine node
+                self._deliver_to_wait_and_combine(edge.target_node, source_node_id, messages)
 
     def send_user_message(self, content: str, user: str = "User") -> list[dict]:
-        """Send a message from user input to connected agents."""
+        """Send a message from user input to connected nodes (agents or WaitAndCombine)."""
         responses = []
 
         if not self._current_agent_graph:
@@ -438,38 +541,59 @@ class AgentGraphRuntime:
                 user_input_node = node
                 break
 
-        # Get target agents
-        target_agent_ids = []
+        # Create message in list format
+        messages = [{"sender": user, "content": content}]
 
         if not user_input_node:
-            target_agent_ids = list(self.agents.keys())
+            # No user input node - send directly to all agents
+            for agent_id in self.agents.keys():
+                agent = self.agents.get(agent_id)
+                if not agent:
+                    continue
+
+                agent_node = self._current_agent_graph.get_node(agent_id)
+                agent_name = agent_node.config.name if agent_node else "Agent"
+
+                response_messages = agent.process_message(messages)
+
+                if response_messages:
+                    responses.append({
+                        "agent_id": agent_id,
+                        "agent_name": agent_name,
+                        "response": response_messages[0]["content"],
+                    })
+                    self._route_messages(agent_id, agent_name, response_messages)
         else:
+            # Route through user input node's connections
             for edge in self._current_agent_graph.edges:
                 if edge.source_node != user_input_node.id:
                     continue
                 if edge.edge_type != EdgeType.MESSAGE:
                     continue
-                if edge.target_node in self.agents:
-                    target_agent_ids.append(edge.target_node)
 
-        # Process message with each target agent
-        for agent_id in target_agent_ids:
-            agent = self.agents.get(agent_id)
-            if not agent:
-                continue
+                target_node = self._current_agent_graph.get_node(edge.target_node)
+                if not target_node:
+                    continue
 
-            agent_node = self._current_agent_graph.get_node(agent_id)
-            agent_name = agent_node.config.name if agent_node else "Agent"
+                if target_node.type == NodeType.AGENT:
+                    agent = self.agents.get(edge.target_node)
+                    if agent:
+                        agent_config = target_node.config if isinstance(target_node.config, dict) else target_node.config.model_dump()
+                        agent_name = agent_config.get("name", "Agent")
 
-            response = agent.process_message(user, content)
+                        response_messages = agent.process_message(messages)
 
-            if response:
-                responses.append({
-                    "agent_id": agent_id,
-                    "agent_name": agent_name,
-                    "response": response,
-                })
-                self._route_agent_response(agent_id, agent_name, response)
+                        if response_messages:
+                            responses.append({
+                                "agent_id": edge.target_node,
+                                "agent_name": agent_name,
+                                "response": response_messages[0]["content"],
+                            })
+                            self._route_messages(edge.target_node, agent_name, response_messages)
+
+                elif target_node.type == NodeType.WAIT_AND_COMBINE:
+                    # Deliver to WaitAndCombine node
+                    self._deliver_to_wait_and_combine(edge.target_node, user_input_node.id, messages)
 
         return responses
 

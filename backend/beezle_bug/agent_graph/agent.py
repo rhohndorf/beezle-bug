@@ -10,8 +10,7 @@ import json
 import time
 from loguru import logger
 from datetime import datetime
-from typing import Optional, Dict, Any
-from queue import Queue
+from typing import Optional, Dict, Any, List
 from jinja2 import Template
 
 from beezle_bug.constants import DEFAULT_MSG_BUFFER_SIZE
@@ -26,7 +25,7 @@ class Agent:
     Unified agent that handles LLM interactions and tool execution.
     
     The Agent class provides a conversation interface with tool calling capabilities.
-    It is triggered by messages from users or event nodes (e.g. ScheduledEventNode).
+    It is triggered by messages from users, event nodes, or WaitAndCombine nodes.
     
     Attributes:
         name: The agent's name
@@ -34,7 +33,6 @@ class Agent:
         toolbox: Collection of available tools
         memory_stream: Stream of conversation history
         knowledge_graph: Structured knowledge storage
-        contacts: Dictionary of contact names to message queues
         event_bus: Optional event bus for introspection
     """
     
@@ -81,32 +79,34 @@ class Agent:
             ))
 
 
-    def process_message(self, sender: str, content: str) -> Optional[str]:
+    def process_message(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """
-        Process an incoming message and generate a response.
+        Process incoming messages and generate a response.
         
         This is the main entry point for all agent interactions, whether from
-        users, other agents, or event nodes (e.g. ScheduledEventNode).
+        users, other agents, event nodes, or WaitAndCombine nodes.
         
         Args:
-            sender: Name of the message sender (user name, agent name, or event node name)
-            content: Message content
+            messages: List of message dicts, each with "sender" and "content" keys
             
         Returns:
-            Agent's response content, or None if no response
+            List of response message dicts with "sender" (this agent's name) and "content"
         """
-        self._emit(EventType.MESSAGE_RECEIVED, {
-            "from": sender,
-            "content": content
-        })
+        # Emit and add all messages to memory before thinking
+        for msg in messages:
+            self._emit(EventType.MESSAGE_RECEIVED, {
+                "from": msg["sender"],
+                "content": msg["content"]
+            })
+            self.memory_stream.add(Message(role="user", content=f"[{msg['sender']}]: {msg['content']}"))
         
-        # Add message to memory
-        self.memory_stream.add(Message(role="user", content=f"[{sender}]: {content}"))
-        
-        # Generate response
+        # Generate response (once, after all messages are added)
         response = self._think()
         
-        return response
+        # Return as list of message dicts
+        if response:
+            return [{"sender": self.name, "content": response}]
+        return []
 
     def _think(self) -> Optional[str]:
         """
