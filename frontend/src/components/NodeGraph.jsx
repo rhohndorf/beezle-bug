@@ -3,7 +3,7 @@ import { socket } from '../lib/socket';
 import { 
   Plus, Trash2, Bot, Database, 
   MessageCircle, Monitor, Brain, Maximize2, ZoomIn, ZoomOut,
-  Wrench, Clock
+  Wrench, Clock, GitMerge
 } from 'lucide-react';
 
 // Node type definitions for the agent graph
@@ -49,6 +49,12 @@ const NODE_TYPES = {
     color: '#06b6d4', 
     icon: Clock,
     defaultConfig: { name: 'Scheduled Event', trigger_type: 'interval', interval_seconds: 30 }
+  },
+  wait_and_combine: { 
+    label: 'Wait & Combine', 
+    color: '#ec4899', 
+    icon: GitMerge,
+    defaultConfig: { name: 'Wait and Combine' }
   },
 };
 

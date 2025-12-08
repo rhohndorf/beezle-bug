@@ -18,6 +18,7 @@ class NodeType(str, Enum):
     USER_INPUT = "user_input"
     USER_OUTPUT = "user_output"
     SCHEDULED_EVENT = "scheduled_event"
+    WAIT_AND_COMBINE = "wait_and_combine"
 
 
 class EdgeType(str, Enum):
@@ -81,6 +82,11 @@ class ScheduledEventNodeConfig(BaseModel):
     message_content: str = "Review your current state and pending tasks."
 
 
+class WaitAndCombineNodeConfig(BaseModel):
+    """Configuration for a Wait and Combine node (rendezvous point)."""
+    name: str = "Wait and Combine"
+
+
 # Union type for all node configs
 NodeConfig = Union[
     AgentNodeConfig,
@@ -90,5 +96,6 @@ NodeConfig = Union[
     UserInputNodeConfig,
     UserOutputNodeConfig,
     ScheduledEventNodeConfig,
+    WaitAndCombineNodeConfig,
 ]
 

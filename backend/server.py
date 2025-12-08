@@ -40,6 +40,7 @@ from beezle_bug.agent_graph import (
     UserInputNodeConfig,
     UserOutputNodeConfig,
     ScheduledEventNodeConfig,
+    WaitAndCombineNodeConfig,
 )
 from beezle_bug.project import TTSSettings, STTSettings
 from beezle_bug.voice.tts import PiperTTS, get_tts, PIPER_AVAILABLE
@@ -542,6 +543,8 @@ def handle_add_node(data):
             config = UserOutputNodeConfig(**config_data)
         elif node_type == NodeType.SCHEDULED_EVENT:
             config = ScheduledEventNodeConfig(**config_data)
+        elif node_type == NodeType.WAIT_AND_COMBINE:
+            config = WaitAndCombineNodeConfig(**config_data)
         else:
             emit("error", {"message": f"Unknown node type: {node_type}"})
             return
