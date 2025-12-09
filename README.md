@@ -18,6 +18,7 @@
 - **Text-to-Speech** – Integrated Piper TTS with voice selection (interruptible on new input)
 - **Voice Input** – Wake word-activated speech-to-text with Whisper
 - **Mobile Web UI** – Dedicated mobile-optimized chat interface at `/mobile` with per-client voice controls
+- **Media Embedding** – Images, videos, and YouTube/Vimeo links automatically embedded in chat
 - **Real-time Introspection** – Watch agent reasoning in real-time
 - **Fully Local or Cloud** – Run entirely on your machine with local LLMs, or connect to remote APIs via LiteLLM
 
@@ -81,6 +82,7 @@ System logs with color-coded entries:
 
 Conversation interface with deployed agents:
 - **Markdown support** – Code blocks, lists, links
+- **Media embedding** – Images, videos, and YouTube/Vimeo links automatically embedded
 - **Audio playback** – TTS-generated responses (interruptible when sending new messages)
 - **Voice input indicator** – Shows listening state (idle/active)
 - **User input** – Send messages via text or voice
@@ -151,7 +153,8 @@ View and manage scheduled events.
 ##### Voice Tab
 
 **Voice Input (Speech-to-Text):**
-- **Continuous Listening** – Enable/disable wake word detection
+- **Continuous Listening** – Enable/disable listening
+- **Skip Wake Word** – Toggle to bypass wake word and go directly to active listening
 - **Microphone Selection** – Choose input device
 - **Wake Words** – Configurable phrases to activate voice input (e.g., "Hey Beezle")
 - **Stop Words** – Phrases to deactivate voice input (e.g., "Stop listening")
@@ -181,13 +184,17 @@ When a Knowledge Graph node is selected, the Node Inspector displays:
 
 A streamlined mobile-optimized interface for on-the-go interaction with your agents.
 
+![Mobile Interface](imgs/screenshots/mobile_interface.png)
+
 **Demo:** [Watch the mobile UI demo](https://youtube.com/shorts/uuKadVtSTFg?feature=share)
 
 Access the mobile interface at `http://your-server:5173/mobile`
 
 **Features:**
 - **Full-screen chat** – Distraction-free conversation view
+- **Media embedding** – Images, videos, and YouTube/Vimeo links automatically embedded
 - **Per-client voice controls** – Independent TTS and STT toggles (separate from desktop settings)
+- **Skip Wake Word toggle** – Bypass wake word detection for immediate voice input
 - **Touch-optimized** – Large touch targets and safe area support for notched phones
 
 
