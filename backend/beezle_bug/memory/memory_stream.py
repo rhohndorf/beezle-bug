@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastembed import TextEmbedding
 
 from beezle_bug.memory.memories import Observation
@@ -19,10 +19,18 @@ class MemoryStream:
         observation = Observation(content=content, embedding=embedding)
         self.memories.append(observation)
 
-    def retrieve(self, text: str, k: int) -> List[Observation]:
+    def retrieve(self, text: str, k: int, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None) -> List[Observation]:
         current_time = datetime.now()
         text_embedding = list(self.embedding_model.query_embed(text))[0]
-        retrieved_memories = sorted(self.memories, key=lambda x: x.score(text_embedding), reverse=True)[0:k]
+        
+        # Filter by date range if specified
+        filtered_memories = self.memories
+        if from_date:
+            filtered_memories = [m for m in filtered_memories if m.created >= from_date]
+        if to_date:
+            filtered_memories = [m for m in filtered_memories if m.created <= to_date]
+        
+        retrieved_memories = sorted(filtered_memories, key=lambda x: x.score(text_embedding), reverse=True)[0:k]
         for mem in retrieved_memories:
             mem.accessed = current_time
         retrieved_memories.sort(key=lambda x: x.created)
