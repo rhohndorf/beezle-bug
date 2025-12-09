@@ -1105,6 +1105,16 @@ def handle_set_stt_enabled(data):
     logger.info(f"Client {sid} STT preference: {enabled}")
 
 
+@socketio.on("set_skip_wake_word")
+def handle_set_skip_wake_word(data):
+    """Echo skip wake word setting back to client for Chat component."""
+    from flask import request
+    enabled = data.get("enabled", False)
+    # Echo back to same client so Chat.jsx can update its state
+    emit("skip_wake_word_changed", {"enabled": enabled})
+    logger.debug(f"Client {request.sid} skip_wake_word: {enabled}")
+
+
 @socketio.on("set_stt_settings")
 def handle_set_stt_settings(data):
     """Update STT settings."""
@@ -1178,13 +1188,23 @@ def handle_stt_stream_start(data=None):
     
     sid = request.sid
     max_duration = _get_stt_max_duration()
+    
+    # Check if client wants to skip wake word detection (e.g., mobile)
+    skip_wake_word = data.get("skip_wake_word", False) if data else False
+    initial_state = "active" if skip_wake_word else "idle"
+    
     _stt_sessions[sid] = {
-        "state": "idle",
+        "state": initial_state,
         "buffer": AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000),
         "speech_started": False,
     }
-    logger.debug(f"STT stream started for session {sid} with max_duration={max_duration}s")
-    emit("stt_status", {"state": "idle", "message": "Listening for wake word..."})
+    logger.debug(f"STT stream started for session {sid} with max_duration={max_duration}s, state={initial_state}")
+    
+    if skip_wake_word:
+        emit("stt_status", {"state": "active", "message": "Listening..."})
+        emit("stt_activated", {})
+    else:
+        emit("stt_status", {"state": "idle", "message": "Listening for wake word..."})
 
 
 @socketio.on("stt_stream_chunk")

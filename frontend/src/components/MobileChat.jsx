@@ -4,6 +4,122 @@ import { Send, Volume2, VolumeX, Square, Mic, MicOff, Wifi, WifiOff } from 'luci
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+// Media URL detection patterns
+const IMAGE_PATTERN = /\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i;
+const VIDEO_PATTERN = /\.(mp4|webm|mov)(\?.*)?$/i;
+const YOUTUBE_PATTERN = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+const VIMEO_PATTERN = /vimeo\.com\/(\d+)/;
+
+// Helper to render embedded media from a URL string
+const renderMediaEmbed = (url) => {
+  // Check for YouTube URL
+  const ytMatch = url.match(YOUTUBE_PATTERN);
+  if (ytMatch) {
+    return (
+      <div className="my-2 aspect-video max-w-full">
+        <iframe
+          src={`https://www.youtube.com/embed/${ytMatch[1]}`}
+          title="YouTube video"
+          className="w-full h-full rounded-lg"
+          frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+  
+  // Check for Vimeo URL
+  const vimeoMatch = url.match(VIMEO_PATTERN);
+  if (vimeoMatch) {
+    return (
+      <div className="my-2 aspect-video max-w-full">
+        <iframe
+          src={`https://player.vimeo.com/video/${vimeoMatch[1]}`}
+          title="Vimeo video"
+          className="w-full h-full rounded-lg"
+          frameBorder="0"
+          allow="autoplay; fullscreen; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+  
+  // Check for image URL
+  if (IMAGE_PATTERN.test(url)) {
+    return (
+      <img 
+        src={url} 
+        alt="" 
+        className="max-w-full rounded-lg my-2 max-h-64 object-contain"
+        loading="lazy"
+      />
+    );
+  }
+  
+  // Check for video URL
+  if (VIDEO_PATTERN.test(url)) {
+    return (
+      <video 
+        src={url} 
+        controls 
+        className="max-w-full rounded-lg my-2 max-h-64"
+        preload="metadata"
+      />
+    );
+  }
+  
+  return null;
+};
+
+// Process text content for bare URLs and embed media
+const processTextForMedia = (text) => {
+  if (typeof text !== 'string') return text;
+  
+  // Pattern to find URLs in text
+  const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = urlPattern.exec(text)) !== null) {
+    // Add text before the URL
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    
+    const url = match[1];
+    const embed = renderMediaEmbed(url);
+    
+    if (embed) {
+      parts.push(embed);
+    } else {
+      // Regular link for non-media URLs
+      parts.push(
+        <a 
+          key={match.index}
+          href={url} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="text-[#3b82f6] underline"
+        >
+          {url}
+        </a>
+      );
+    }
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  
+  return parts.length > 0 ? parts : text;
+};
+
 // Simplified markdown components for mobile
 const MarkdownComponents = {
   code({ node, inline, className, children, ...props }) {
@@ -42,7 +158,82 @@ const MarkdownComponents = {
   ol({ children }) {
     return <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>;
   },
+  // Images
+  img({ src, alt }) {
+    return (
+      <img 
+        src={src} 
+        alt={alt || ''} 
+        className="max-w-full rounded-lg my-2 max-h-64 object-contain"
+        loading="lazy"
+      />
+    );
+  },
+  // Links - detect and embed media
   a({ href, children }) {
+    if (!href) {
+      return <span>{children}</span>;
+    }
+    
+    // Check for image URL
+    if (IMAGE_PATTERN.test(href)) {
+      return (
+        <img 
+          src={href} 
+          alt="" 
+          className="max-w-full rounded-lg my-2 max-h-64 object-contain"
+          loading="lazy"
+        />
+      );
+    }
+    
+    // Check for video URL
+    if (VIDEO_PATTERN.test(href)) {
+      return (
+        <video 
+          src={href} 
+          controls 
+          className="max-w-full rounded-lg my-2 max-h-64"
+          preload="metadata"
+        />
+      );
+    }
+    
+    // Check for YouTube URL
+    const ytMatch = href.match(YOUTUBE_PATTERN);
+    if (ytMatch) {
+      return (
+        <div className="my-2 aspect-video max-w-full">
+          <iframe
+            src={`https://www.youtube.com/embed/${ytMatch[1]}`}
+            title="YouTube video"
+            className="w-full h-full rounded-lg"
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      );
+    }
+    
+    // Check for Vimeo URL
+    const vimeoMatch = href.match(VIMEO_PATTERN);
+    if (vimeoMatch) {
+      return (
+        <div className="my-2 aspect-video max-w-full">
+          <iframe
+            src={`https://player.vimeo.com/video/${vimeoMatch[1]}`}
+            title="Vimeo video"
+            className="w-full h-full rounded-lg"
+            frameBorder="0"
+            allow="autoplay; fullscreen; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      );
+    }
+    
+    // Regular link
     return (
       <a href={href} target="_blank" rel="noopener noreferrer" className="text-[#3b82f6] underline">
         {children}
@@ -51,6 +242,30 @@ const MarkdownComponents = {
   },
   strong({ children }) {
     return <strong className="font-bold text-[#e5e5e5]">{children}</strong>;
+  },
+  // Table support with media embedding
+  table({ children }) {
+    return (
+      <div className="overflow-x-auto my-2">
+        <table className="min-w-full border border-[#2b2b2b]">{children}</table>
+      </div>
+    );
+  },
+  thead({ children }) {
+    return <thead className="bg-[#1a1a1a]">{children}</thead>;
+  },
+  th({ children }) {
+    return <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-[#888] border-b border-[#2b2b2b]">{children}</th>;
+  },
+  td({ children }) {
+    // Process children for bare URLs that should be embedded
+    const processedChildren = React.Children.map(children, child => {
+      if (typeof child === 'string') {
+        return processTextForMedia(child);
+      }
+      return child;
+    });
+    return <td className="px-3 py-2 border-b border-[#2b2b2b] text-[#d4d4d4]">{processedChildren}</td>;
   },
 };
 
@@ -68,6 +283,7 @@ export default function MobileChat() {
   const [voiceState, setVoiceState] = useState('idle');
   const [sttEnabled, setSttEnabled] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [skipWakeWord, setSkipWakeWord] = useState(true); // Default true on mobile
   const [sttSettings, setSttSettings] = useState(null);
   const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -174,16 +390,6 @@ export default function MobileChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Audio capture for STT
-  useEffect(() => {
-    if (sttEnabled && sttSettings && isDeployed) {
-      startAudioCapture();
-    } else {
-      stopAudioCapture();
-    }
-    return () => stopAudioCapture();
-  }, [sttEnabled, sttSettings, isDeployed]);
-
   const startAudioCapture = useCallback(async () => {
     try {
       const constraints = {
@@ -202,8 +408,8 @@ export default function MobileChat() {
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
       
-      socket.emit('stt_stream_start');
-      setVoiceState('listening');
+      socket.emit('stt_stream_start', { skip_wake_word: skipWakeWord });
+      setVoiceState(skipWakeWord ? 'active' : 'listening');
       
       let silenceFrames = 0;
       const SILENCE_THRESHOLD = 0.01;
@@ -245,7 +451,7 @@ export default function MobileChat() {
       console.error('Failed to start audio capture:', err);
       setSttEnabled(false);
     }
-  }, [sttSettings]);
+  }, [sttSettings, skipWakeWord]);
 
   const stopAudioCapture = useCallback(() => {
     const wasCapturing = processorRef.current != null;
@@ -268,6 +474,16 @@ export default function MobileChat() {
     }
     setVoiceState('idle');
   }, []);
+
+  // Audio capture for STT
+  useEffect(() => {
+    if (sttEnabled && sttSettings && isDeployed) {
+      startAudioCapture();
+    } else {
+      stopAudioCapture();
+    }
+    return () => stopAudioCapture();
+  }, [sttEnabled, sttSettings, isDeployed, startAudioCapture, stopAudioCapture]);
 
   // Track message count (audio now comes via tts_audio event, not in messages)
   useEffect(() => {
@@ -369,17 +585,34 @@ export default function MobileChat() {
           </div>
         </div>
         
-        {/* Voice Input Status Indicator */}
-        {sttEnabled && isDeployed && (
-          <div className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${
-            voiceState === 'active' 
-              ? 'bg-[#22c55e]/20 text-[#22c55e]' 
-              : 'bg-[#f59e0b]/20 text-[#f59e0b]'
-          }`}>
-            <Mic size={12} className={voiceState === 'active' ? 'animate-pulse' : ''} />
-            {voiceState === 'active' ? 'Speaking' : 'Listening'}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Voice Input Status Indicator */}
+          {sttEnabled && isDeployed && (
+            <div className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${
+              voiceState === 'active' 
+                ? 'bg-[#22c55e]/20 text-[#22c55e]' 
+                : 'bg-[#f59e0b]/20 text-[#f59e0b]'
+            }`}>
+              <Mic size={12} className={voiceState === 'active' ? 'animate-pulse' : ''} />
+              {voiceState === 'active' ? 'Speaking' : 'Listening'}
+            </div>
+          )}
+          
+          {/* Skip Wake Word Toggle */}
+          <button
+            onClick={() => setSkipWakeWord(!skipWakeWord)}
+            className="flex items-center gap-1.5 text-[10px] text-[#666] active:text-[#888]"
+          >
+            <span>Skip wake word activation</span>
+            <div className={`w-7 h-3.5 rounded-full transition-colors relative ${
+              skipWakeWord ? 'bg-[#22c55e]' : 'bg-[#333]'
+            }`}>
+              <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform ${
+                skipWakeWord ? 'translate-x-3.5' : 'translate-x-0.5'
+              }`} />
+            </div>
+          </button>
+        </div>
       </header>
 
       {/* Messages */}
@@ -431,7 +664,7 @@ export default function MobileChat() {
                       {msg.text}
                     </ReactMarkdown>
                   ) : (
-                    msg.text
+                    processTextForMedia(msg.text)
                   )}
                 </div>
               </div>

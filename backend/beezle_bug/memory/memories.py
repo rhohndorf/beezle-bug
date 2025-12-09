@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 import math
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from collections.abc import Iterable
 
 from beezle_bug.llm_adapter import Message, ToolCallResult, Response
@@ -44,8 +44,18 @@ class Observation(BaseModel):
     created: datetime = Field(default_factory=datetime.now)
     accessed: datetime = Field(default_factory=datetime.now)
     importance: float = Field(default=0.0)
-    embedding: Iterable
+    embedding: List[float] = Field(default_factory=list)  # Changed from Iterable
     content: Message|ToolCallResult|Response
+
+    @field_validator('embedding', mode='before')
+    @classmethod
+    def convert_embedding(cls, v):
+        """Ensure embedding is a list of floats, not an iterator."""
+        if hasattr(v, 'tolist'):
+            return v.tolist()
+        elif hasattr(v, '__iter__') and not isinstance(v, (list, np.ndarray)):
+            return list(v)
+        return v
 
     @property
     def recency(self) -> float:

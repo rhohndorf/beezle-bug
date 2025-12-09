@@ -26,6 +26,7 @@ export default function VoiceSettingsTab({ isDeployed = false }) {
   const [microphones, setMicrophones] = useState([]);
   const [newWakeWord, setNewWakeWord] = useState('');
   const [newStopWord, setNewStopWord] = useState('');
+  const [skipWakeWord, setSkipWakeWord] = useState(false); // Default false on desktop
   
   const [loading, setLoading] = useState(true);
 
@@ -256,8 +257,34 @@ export default function VoiceSettingsTab({ isDeployed = false }) {
             )}
           </div>
           
+          {/* Skip Wake Word Toggle */}
+          <div className="flex items-center justify-between p-3 rounded border border-[#2b2b2b] bg-[#1a1a1a]">
+            <div>
+              <div className="text-xs font-medium text-[#e5e5e5]">Skip Wake Word</div>
+              <div className="text-[10px] text-[#666] mt-0.5">
+                Go directly to active listening without wake word
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setSkipWakeWord(!skipWakeWord);
+                // Emit to socket so Chat.jsx can access it
+                socket.emit('set_skip_wake_word', { enabled: !skipWakeWord });
+              }}
+              className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${
+                skipWakeWord ? 'bg-[#22c55e]' : 'bg-[#333]'
+              }`}
+            >
+              <div
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                  skipWakeWord ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+          
           {/* Wake Words */}
-          <div className="p-3 rounded border border-[#2b2b2b] bg-[#1a1a1a]">
+          <div className={`p-3 rounded border border-[#2b2b2b] bg-[#1a1a1a] ${skipWakeWord ? 'opacity-50' : ''}`}>
             <div className="text-xs font-medium text-[#e5e5e5] mb-2">Wake Words</div>
             <div className="text-[10px] text-[#666] mb-2">
               Say any of these to start sending messages
@@ -299,7 +326,7 @@ export default function VoiceSettingsTab({ isDeployed = false }) {
           </div>
           
           {/* Stop Words */}
-          <div className="p-3 rounded border border-[#2b2b2b] bg-[#1a1a1a]">
+          <div className={`p-3 rounded border border-[#2b2b2b] bg-[#1a1a1a] ${skipWakeWord ? 'opacity-50' : ''}`}>
             <div className="text-xs font-medium text-[#e5e5e5] mb-2">Stop Words</div>
             <div className="text-[10px] text-[#666] mb-2">
               Say any of these to stop sending messages

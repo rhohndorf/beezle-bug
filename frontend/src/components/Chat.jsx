@@ -4,6 +4,122 @@ import { Send, Terminal, Volume2, Square, Mic, MicOff } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+// Media URL detection patterns
+const IMAGE_PATTERN = /\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i;
+const VIDEO_PATTERN = /\.(mp4|webm|mov)(\?.*)?$/i;
+const YOUTUBE_PATTERN = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+const VIMEO_PATTERN = /vimeo\.com\/(\d+)/;
+
+// Helper to render embedded media from a URL string
+const renderMediaEmbed = (url) => {
+  // Check for YouTube URL
+  const ytMatch = url.match(YOUTUBE_PATTERN);
+  if (ytMatch) {
+    return (
+      <div className="my-2 aspect-video max-w-full">
+        <iframe
+          src={`https://www.youtube.com/embed/${ytMatch[1]}`}
+          title="YouTube video"
+          className="w-full h-full rounded-lg"
+          frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+  
+  // Check for Vimeo URL
+  const vimeoMatch = url.match(VIMEO_PATTERN);
+  if (vimeoMatch) {
+    return (
+      <div className="my-2 aspect-video max-w-full">
+        <iframe
+          src={`https://player.vimeo.com/video/${vimeoMatch[1]}`}
+          title="Vimeo video"
+          className="w-full h-full rounded-lg"
+          frameBorder="0"
+          allow="autoplay; fullscreen; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+  
+  // Check for image URL
+  if (IMAGE_PATTERN.test(url)) {
+    return (
+      <img 
+        src={url} 
+        alt="" 
+        className="max-w-full rounded-lg my-2 max-h-80 object-contain"
+        loading="lazy"
+      />
+    );
+  }
+  
+  // Check for video URL
+  if (VIDEO_PATTERN.test(url)) {
+    return (
+      <video 
+        src={url} 
+        controls 
+        className="max-w-full rounded-lg my-2 max-h-80"
+        preload="metadata"
+      />
+    );
+  }
+  
+  return null;
+};
+
+// Process text content for bare URLs and embed media
+const processTextForMedia = (text) => {
+  if (typeof text !== 'string') return text;
+  
+  // Pattern to find URLs in text
+  const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = urlPattern.exec(text)) !== null) {
+    // Add text before the URL
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    
+    const url = match[1];
+    const embed = renderMediaEmbed(url);
+    
+    if (embed) {
+      parts.push(embed);
+    } else {
+      // Regular link for non-media URLs
+      parts.push(
+        <a 
+          key={match.index}
+          href={url} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="text-[#3b82f6] hover:text-[#60a5fa] underline"
+        >
+          {url}
+        </a>
+      );
+    }
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  
+  return parts.length > 0 ? parts : text;
+};
+
 // Custom components for markdown rendering
 const MarkdownComponents = {
   // Code blocks
@@ -58,8 +174,82 @@ const MarkdownComponents = {
   li({ children }) {
     return <li className="text-[#d4d4d4]">{children}</li>;
   },
-  // Links
+  // Images
+  img({ src, alt }) {
+    return (
+      <img 
+        src={src} 
+        alt={alt || ''} 
+        className="max-w-full rounded-lg my-2 max-h-80 object-contain"
+        loading="lazy"
+      />
+    );
+  },
+  // Links - detect and embed media
   a({ href, children }) {
+    if (!href) {
+      return <span>{children}</span>;
+    }
+    
+    // Check for image URL
+    if (IMAGE_PATTERN.test(href)) {
+      return (
+        <img 
+          src={href} 
+          alt="" 
+          className="max-w-full rounded-lg my-2 max-h-80 object-contain"
+          loading="lazy"
+        />
+      );
+    }
+    
+    // Check for video URL
+    if (VIDEO_PATTERN.test(href)) {
+      return (
+        <video 
+          src={href} 
+          controls 
+          className="max-w-full rounded-lg my-2 max-h-80"
+          preload="metadata"
+        />
+      );
+    }
+    
+    // Check for YouTube URL
+    const ytMatch = href.match(YOUTUBE_PATTERN);
+    if (ytMatch) {
+      return (
+        <div className="my-2 aspect-video max-w-full">
+          <iframe
+            src={`https://www.youtube.com/embed/${ytMatch[1]}`}
+            title="YouTube video"
+            className="w-full h-full rounded-lg"
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      );
+    }
+    
+    // Check for Vimeo URL
+    const vimeoMatch = href.match(VIMEO_PATTERN);
+    if (vimeoMatch) {
+      return (
+        <div className="my-2 aspect-video max-w-full">
+          <iframe
+            src={`https://player.vimeo.com/video/${vimeoMatch[1]}`}
+            title="Vimeo video"
+            className="w-full h-full rounded-lg"
+            frameBorder="0"
+            allow="autoplay; fullscreen; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      );
+    }
+    
+    // Regular link
     return (
       <a 
         href={href} 
@@ -94,7 +284,14 @@ const MarkdownComponents = {
     return <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wide text-[#888] border-b border-[#2b2b2b]">{children}</th>;
   },
   td({ children }) {
-    return <td className="px-3 py-2 border-b border-[#2b2b2b] text-[#d4d4d4]">{children}</td>;
+    // Process children for bare URLs that should be embedded
+    const processedChildren = React.Children.map(children, child => {
+      if (typeof child === 'string') {
+        return processTextForMedia(child);
+      }
+      return child;
+    });
+    return <td className="px-3 py-2 border-b border-[#2b2b2b] text-[#d4d4d4]">{processedChildren}</td>;
   },
   // Horizontal rule
   hr() {
@@ -121,6 +318,7 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
   const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'active'
   const [sttEnabled, setSttEnabled] = useState(false);
   const [sttSettings, setSttSettings] = useState(null);
+  const [skipWakeWord, setSkipWakeWord] = useState(false); // Desktop default: false
   const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef(null);
   const streamRef = useRef(null);
@@ -160,11 +358,17 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
       setVoiceState('listening');
     };
     
+    // Handle skip wake word setting change from VoiceSettingsTab
+    const handleSkipWakeWordChanged = (data) => {
+      setSkipWakeWord(data.enabled);
+    };
+    
     socket.on('stt_settings', handleSttSettings);
     socket.on('voice_state_change', handleVoiceStateChange);
     socket.on('stt_status', handleSttStatus);
     socket.on('stt_activated', handleSttActivated);
     socket.on('stt_deactivated', handleSttDeactivated);
+    socket.on('skip_wake_word_changed', handleSkipWakeWordChanged);
     socket.emit('get_stt_settings');
     
     return () => {
@@ -173,21 +377,9 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
       socket.off('stt_status', handleSttStatus);
       socket.off('stt_activated', handleSttActivated);
       socket.off('stt_deactivated', handleSttDeactivated);
+      socket.off('skip_wake_word_changed', handleSkipWakeWordChanged);
     };
   }, []);
-  
-  // Start/stop audio capture based on sttEnabled and deployment state
-  useEffect(() => {
-    if (sttEnabled && sttSettings && isDeployed) {
-      startAudioCapture();
-    } else {
-      stopAudioCapture();
-    }
-    
-    return () => {
-      stopAudioCapture();
-    };
-  }, [sttEnabled, sttSettings, isDeployed]);
   
   const startAudioCapture = useCallback(async () => {
     try {
@@ -211,8 +403,8 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
       processorRef.current = processor;
       
       // Use stt_stream_start for continuous wake word mode
-      socket.emit('stt_stream_start');
-      setVoiceState('listening');
+      socket.emit('stt_stream_start', { skip_wake_word: skipWakeWord });
+      setVoiceState(skipWakeWord ? 'active' : 'listening');
       
       // Simple energy-based speech detection
       let silenceFrames = 0;
@@ -259,7 +451,7 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
       console.error('Failed to start audio capture:', err);
       setSttEnabled(false);
     }
-  }, [sttSettings]);
+  }, [sttSettings, skipWakeWord]);
   
   const stopAudioCapture = useCallback(() => {
     const wasCapturing = processorRef.current != null;
@@ -283,6 +475,19 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
     }
     setVoiceState('idle');
   }, []);
+
+  // Start/stop audio capture based on sttEnabled and deployment state
+  useEffect(() => {
+    if (sttEnabled && sttSettings && isDeployed) {
+      startAudioCapture();
+    } else {
+      stopAudioCapture();
+    }
+    
+    return () => {
+      stopAudioCapture();
+    };
+  }, [sttEnabled, sttSettings, isDeployed, startAudioCapture, stopAudioCapture]);
 
   // Track message count (audio now comes via tts_audio event, not in messages)
   useEffect(() => {
@@ -453,7 +658,7 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
                       {msg.text}
                     </ReactMarkdown>
                   ) : (
-                    msg.text
+                    processTextForMedia(msg.text)
                   )}
                 </div>
               </div>
