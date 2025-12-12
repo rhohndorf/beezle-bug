@@ -51,7 +51,7 @@ class ReadWebsite(Tool):
         description="The URL of the website to read.",
     )
 
-    def run(self, agent):
+    async def run(self, agent):
         try:
             response = requests.get(self.url, headers=_HEADERS, timeout=10)
             if response.status_code == 200:
@@ -92,7 +92,7 @@ class SearchWeb(Tool):
         description="Maximum number of results to return (1-25).",
     )
 
-    def run(self, agent):
+    async def run(self, agent):
         try:
             # POST to DuckDuckGo HTML search
             response = requests.post(
@@ -158,7 +158,7 @@ class SearchNews(Tool):
         description="Maximum number of results to return (1-25).",
     )
 
-    def run(self, agent):
+    async def run(self, agent):
         try:
             # POST to DuckDuckGo HTML search with news filter
             response = requests.post(

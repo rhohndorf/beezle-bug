@@ -2,7 +2,7 @@
 Core agent module for Beezle Bug.
 
 This module implements the Agent class which handles LLM interactions,
-tool calling, and memory management. The agent operates synchronously
+tool calling, and memory management. The agent operates asynchronously
 and is triggered by messages from users or event nodes.
 """
 
@@ -25,7 +25,9 @@ class Agent:
     Unified agent that handles LLM interactions and tool execution.
     
     The Agent class provides a conversation interface with tool calling capabilities.
-    It is triggered by messages from users, event nodes, or WaitAndCombine nodes.
+    It is triggered by messages from users, other agents, event nodes, or WaitAndCombine nodes.
+    
+    All operations are async to support storage-backed memory and knowledge graph.
     
     Attributes:
         name: The agent's name
@@ -78,8 +80,7 @@ class Agent:
                 data=data
             ))
 
-
-    def process_message(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    async def process_message(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """
         Process incoming messages and generate a response.
         
@@ -98,17 +99,17 @@ class Agent:
                 "from": msg["sender"],
                 "content": msg["content"]
             })
-            self.memory_stream.add(Message(role="user", content=f"[{msg['sender']}]: {msg['content']}"))
+            await self.memory_stream.add(Message(role="user", content=f"[{msg['sender']}]: {msg['content']}"))
         
         # Generate response (once, after all messages are added)
-        response = self._think()
+        response = await self._think()
         
         # Return as list of message dicts
         if response:
             return [{"sender": self.name, "content": response}]
         return []
 
-    def _think(self) -> Optional[str]:
+    async def _think(self) -> Optional[str]:
         """
         Core thinking loop - generates LLM response and executes tools.
         
@@ -122,9 +123,15 @@ class Agent:
             entity_schemas=get_schema_for_prompt()
         )
         
+        # Get recent memories for context
+        # For now, use in-memory list if available, otherwise just use system message
+        recent_memories = []
+        if hasattr(self.memory_stream, 'memories') and self.memory_stream.memories:
+            recent_memories = [mem.content for mem in self.memory_stream.memories[-DEFAULT_MSG_BUFFER_SIZE:]]
+        
         messages = [
             Message(role="system", content=system_message)
-        ] + [mem.content for mem in self.memory_stream.memories[-DEFAULT_MSG_BUFFER_SIZE:]]
+        ] + recent_memories
         
         self._emit(EventType.LLM_CALL_STARTED, {
             "context_messages": len(messages),
@@ -161,7 +168,7 @@ class Agent:
             self._emit(EventType.ERROR_OCCURRED, {"error": str(e)})
             return None
 
-        self.memory_stream.add(response)
+        await self.memory_stream.add(response)
         messages.append(response)
 
         # Process tool calls
@@ -185,7 +192,8 @@ class Agent:
                     
                     if func_name in self.toolbox:
                         tool = self.toolbox.get_tool(func_name, json.loads(func_args))
-                        result_content = tool.run(self)
+                        # Tools are now async
+                        result_content = await tool.run(self)
                         result = ToolCallResult(
                             tool_call_id=tool_call.id,
                             content=str(result_content),
@@ -209,7 +217,7 @@ class Agent:
                         "success": True
                     })
 
-                    self.memory_stream.add(result)
+                    await self.memory_stream.add(result)
                     messages.append(result)
 
                 except Exception as e:
@@ -225,13 +233,13 @@ class Agent:
                         content=f"Error: {e}",
                         role="tool"
                     )
-                    self.memory_stream.add(result)
+                    await self.memory_stream.add(result)
                     messages.append(result)
             
             # Continue thinking after tool execution
             try:
                 response = self.adapter.chat_completion(messages, self.toolbox.get_tools())
-                self.memory_stream.add(response)
+                await self.memory_stream.add(response)
                 messages.append(response)
             except Exception as e:
                 logger.error(f"LLM call failed: {e}")

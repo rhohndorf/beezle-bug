@@ -12,7 +12,7 @@ class Wait(Tool):
     This is the best tool to choose in most cases, when there is no active task to be completed.
     """
 
-    def run(self, agent):
+    async def run(self, agent):
         return
 
 
@@ -27,7 +27,7 @@ class Reason(Tool):
 
     thought: str = Field(..., description="Your thought")
 
-    def run(self, agent):
+    async def run(self, agent):
         return self.thought
 
 
@@ -41,7 +41,7 @@ class SetEngagement(Tool):
 
     engagement: int = Field(..., description="")
 
-    def run(self, agent):
+    async def run(self, agent):
         if self.engagement < 1 or self.engagement > 100:
             return "Error: Engagement value must be in the range from 1-100"
         agent.set_engagement(self.engagement)
@@ -59,7 +59,7 @@ class SelfReflect(Tool):
     goal: str = Field(..., description="Your current goal")
     thought: str = Field(..., description="Your thought")
 
-    def run(self, agent):
+    async def run(self, agent):
         return json.dumps({"summary": self.situation, "goal": self.goal, "thought": self.thought})
 
 
@@ -72,7 +72,7 @@ class SelfCritique(Tool):
 
     criticism: str = Field(..., description="Your self-criticism")
 
-    def run(self, agent):
+    async def run(self, agent):
         return self.criticism
 
 
@@ -81,6 +81,6 @@ class GetDateAndTime(Tool):
     Get the current date and time
     """
 
-    def run(self, agent):
+    async def run(self, agent):
         current_datetime = datetime.now().strftime("%A, %d %B %Y, %H:%M")
         return current_datetime

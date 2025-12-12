@@ -5,12 +5,13 @@ Responsibilities:
 - Deploy/undeploy agent graphs
 - Manage live agent, KG, memory stream instances
 - Route messages between connected nodes
+
+All message processing and storage operations are async.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
-from typing import Optional, Any, Callable, List, Dict
+from typing import TYPE_CHECKING, Optional, Any, Callable, List, Dict
 from loguru import logger
 
 from .types import NodeType, EdgeType
@@ -27,7 +28,9 @@ from beezle_bug.template import TemplateLoader
 from beezle_bug.tools.toolbox_factory import ToolboxFactory
 from beezle_bug.tools import Tool
 from beezle_bug.llm_adapter import OpenAiAdapter
-from beezle_bug.storage import StorageService
+
+if TYPE_CHECKING:
+    from beezle_bug.storage.base import StorageBackend
 
 
 @dataclass
@@ -40,7 +43,7 @@ class WaitAndCombineState:
 
 def create_delegate_tool(agents_dict: dict, target_node_id: str, target_name: str, source_name: str) -> type[Tool]:
     """
-    Create a delegate tool class that calls another agent synchronously.
+    Create a delegate tool class that calls another agent.
     
     Args:
         agents_dict: Reference to the runtime's agents dict (for runtime lookup)
@@ -58,13 +61,13 @@ def create_delegate_tool(agents_dict: dict, target_node_id: str, target_name: st
     class DelegateTool(Tool):
         question: str
         
-        def run(self, agent) -> str:
+        async def run(self, agent) -> str:
             target_agent = agents_dict.get(target_node_id)
             if not target_agent:
                 return f"Error: Agent '{target_name}' is not available"
             # Use list-based message format
             messages = [{"sender": source_name, "content": self.question}]
-            response_messages = target_agent.process_message(messages)
+            response_messages = await target_agent.process_message(messages)
             if response_messages:
                 return response_messages[0]["content"]
             return "No response from agent"
@@ -80,7 +83,7 @@ class AgentGraphRuntime:
 
     def __init__(
         self,
-        storage: StorageService,
+        storage: "StorageBackend",
         event_bus: EventBus,
         scheduler: Scheduler,
         template_loader: TemplateLoader,
@@ -105,6 +108,10 @@ class AgentGraphRuntime:
         self.memory_streams: dict[str, MemoryStream] = {}
         self.toolboxes: dict[str, list[str]] = {}
         self.wait_and_combine_states: dict[str, WaitAndCombineState] = {}
+        
+        # Database IDs for KG and MS (node_id -> db_id)
+        self._kg_db_ids: dict[str, int] = {}
+        self._ms_db_ids: dict[str, int] = {}
 
         # Subscribe to events for message routing
         self.event_bus.subscribe(EventType.MESSAGE_SENT, self._on_agent_message)
@@ -112,21 +119,21 @@ class AgentGraphRuntime:
 
     # === Deploy / Undeploy ===
 
-    def deploy(self, agent_graph: AgentGraph, project_id: str) -> None:
+    async def deploy(self, agent_graph: AgentGraph, project_id: str) -> None:
         """Deploy an agent graph - instantiate all nodes."""
         if self.is_deployed:
             logger.warning("Already deployed, undeploying first")
-            self.undeploy()
+            await self.undeploy()
 
         self._current_agent_graph = agent_graph
         self._current_project_id = project_id
 
         logger.info(f"Deploying agent graph for project {project_id}")
-        self._instantiate_agent_graph(agent_graph)
+        await self._instantiate_agent_graph(agent_graph)
         self.is_deployed = True
         logger.info(f"Agent graph deployed for project {project_id}")
 
-    def undeploy(self) -> None:
+    async def undeploy(self) -> None:
         """Undeploy - stop all runtime instances."""
         if not self.is_deployed or not self._current_agent_graph:
             return
@@ -142,14 +149,15 @@ class AgentGraphRuntime:
         for agent_id in list(self.agents.keys()):
             self._stop_agent_node(agent_id)
 
-        # Persist all node data before clearing
-        self.persist_all()
+        # No need to persist - data is saved in real-time
 
         # Clear resources
         self.knowledge_graphs.clear()
         self.memory_streams.clear()
         self.toolboxes.clear()
         self.wait_and_combine_states.clear()
+        self._kg_db_ids.clear()
+        self._ms_db_ids.clear()
 
         self._current_agent_graph = None
         self._current_project_id = None
@@ -158,14 +166,14 @@ class AgentGraphRuntime:
 
     # === Agent Graph Instantiation ===
 
-    def _instantiate_agent_graph(self, agent_graph: AgentGraph) -> None:
+    async def _instantiate_agent_graph(self, agent_graph: AgentGraph) -> None:
         """Instantiate all nodes in an agent graph."""
         # First pass: create resources (KGs, Memory Streams, Toolboxes)
         for node in agent_graph.nodes:
             if node.type == NodeType.KNOWLEDGE_GRAPH:
-                self._create_kg_node(node)
+                await self._create_kg_node(node)
             elif node.type == NodeType.MEMORY_STREAM:
-                self._create_memory_stream_node(node)
+                await self._create_memory_stream_node(node)
             elif node.type == NodeType.TOOLBOX:
                 self._create_toolbox_node(node)
 
@@ -184,38 +192,47 @@ class AgentGraphRuntime:
             if node.type == NodeType.WAIT_AND_COMBINE:
                 self._create_wait_and_combine_node(node, agent_graph)
 
-    def _create_kg_node(self, node: Node) -> KnowledgeGraph:
+    async def _create_kg_node(self, node: Node) -> KnowledgeGraph:
         """Create a Knowledge Graph instance for a node."""
         config = node.config if isinstance(node.config, dict) else node.config.model_dump()
         name = config.get("name", "Knowledge Graph")
 
-        # Load persisted KG data if exists, otherwise create new
-        kg = None
-        if self._current_project_id:
-            kg = self.storage.load_knowledge_graph(self._current_project_id, node.id)
+        # Ensure KG exists in database and get its ID
+        kg_id = await self.storage.kg_ensure(self._current_project_id, node.id)
+        self._kg_db_ids[node.id] = kg_id
+
+        # Load existing data from database
+        kg = await self.storage.kg_load_full(self._current_project_id, node.id)
         
         if kg is None:
-            kg = KnowledgeGraph()
+            kg = KnowledgeGraph(storage=self.storage, kg_id=kg_id)
+        else:
+            # Inject storage into loaded KG
+            kg._storage = self.storage
+            kg._kg_id = kg_id
 
         self.knowledge_graphs[node.id] = kg
-        logger.info(f"Created KG node: {name} ({node.id})")
+        logger.info(f"Created KG node: {name} ({node.id}), db_id={kg_id}")
         return kg
 
-    def _create_memory_stream_node(self, node: Node) -> MemoryStream:
+    async def _create_memory_stream_node(self, node: Node) -> MemoryStream:
         """Create a Memory Stream instance for a node."""
         config = node.config if isinstance(node.config, dict) else node.config.model_dump()
         name = config.get("name", "Memory Stream")
 
-        # Load persisted data if exists, otherwise create new
-        ms = None
-        if self._current_project_id:
-            ms = self.storage.load_memory_stream(self._current_project_id, node.id)
+        # Ensure MS exists in database and get its ID
+        ms_id = await self.storage.ms_ensure(self._current_project_id, node.id)
+        self._ms_db_ids[node.id] = ms_id
+
+        # Create storage-aware memory stream
+        ms = MemoryStream(storage=self.storage, ms_id=ms_id)
         
-        if ms is None:
-            ms = MemoryStream()
+        # Load metadata
+        metadata = await self.storage.ms_get_metadata(ms_id)
+        ms.last_reflection_point = metadata.get("last_reflection_point", 0)
 
         self.memory_streams[node.id] = ms
-        logger.info(f"Created Memory Stream node: {name} ({node.id})")
+        logger.info(f"Created Memory Stream node: {name} ({node.id}), db_id={ms_id}")
         return ms
 
     def _create_toolbox_node(self, node: Node) -> list[str]:
@@ -295,7 +312,8 @@ class AgentGraphRuntime:
             api_key=api_key,
         )
 
-        # Create agent
+        # Create agent with storage-aware KG and MS
+        # If no KG/MS connected, create in-memory ones (no storage)
         agent = Agent(
             id=node.id,
             name=name,
@@ -343,8 +361,9 @@ class AgentGraphRuntime:
 
         task_id = f"{node.id}_scheduled"
         scheduled_event_node_id = node.id
+        runtime = self  # Capture reference for async callback
 
-        def scheduled_tick(targets=target_info, event_name=name, content=message_content):
+        async def scheduled_tick_async(targets=target_info, event_name=name, content=message_content):
             messages = [{"sender": event_name, "content": content}]
             
             for target in targets:
@@ -352,7 +371,7 @@ class AgentGraphRuntime:
                 target_type = target["node_type"]
                 
                 if target_type == NodeType.AGENT:
-                    agent = self.agents.get(target_id)
+                    agent = runtime.agents.get(target_id)
                     if agent:
                         target_node = agent_graph.get_node(target_id)
                         agent_name = "Agent"
@@ -360,12 +379,12 @@ class AgentGraphRuntime:
                             agent_config = target_node.config if isinstance(target_node.config, dict) else target_node.config.model_dump()
                             agent_name = agent_config.get("name", "Agent")
 
-                        response_messages = agent.process_message(messages)
+                        response_messages = await agent.process_message(messages)
                         if response_messages:
-                            self._route_messages(target_id, agent_name, response_messages)
+                            await runtime._route_messages(target_id, agent_name, response_messages)
                 
                 elif target_type == NodeType.WAIT_AND_COMBINE:
-                    self._deliver_to_wait_and_combine(target_id, scheduled_event_node_id, messages)
+                    await runtime._deliver_to_wait_and_combine(target_id, scheduled_event_node_id, messages)
 
         if trigger_type == "once":
             if not run_at_str:
@@ -376,7 +395,7 @@ class AgentGraphRuntime:
                 self.scheduler.schedule_once(
                     task_id=task_id,
                     agent_id=node.id,
-                    callback=scheduled_tick,
+                    callback=scheduled_tick_async,
                     run_at=run_at,
                 )
                 logger.info(f"Created one-time scheduled event '{name}' for {run_at}")
@@ -386,7 +405,7 @@ class AgentGraphRuntime:
             self.scheduler.schedule_interval(
                 task_id=task_id,
                 agent_id=node.id,
-                callback=scheduled_tick,
+                callback=scheduled_tick_async,
                 interval_seconds=interval_seconds,
                 start_immediately=False,
             )
@@ -423,7 +442,7 @@ class AgentGraphRuntime:
         )
         logger.info(f"Created WaitAndCombine node: {name} ({node.id}) expecting {len(expected_senders)} senders")
 
-    def _deliver_to_wait_and_combine(
+    async def _deliver_to_wait_and_combine(
         self, 
         node_id: str, 
         sender_node_id: str, 
@@ -466,7 +485,7 @@ class AgentGraphRuntime:
             )
 
             # Route combined messages to targets
-            self._route_messages(node_id, name, combined_messages)
+            await self._route_messages(node_id, name, combined_messages)
 
     # === Message Routing ===
 
@@ -478,7 +497,7 @@ class AgentGraphRuntime:
         """Handle response events from agents (legacy event handler)."""
         pass  # No longer used - messages are routed via _route_messages
 
-    def _route_messages(
+    async def _route_messages(
         self, 
         source_node_id: str, 
         source_name: str, 
@@ -518,16 +537,16 @@ class AgentGraphRuntime:
                     target_name = target_config.get("name", "Agent")
 
                     logger.debug(f"Forwarding {len(messages)} message(s) from {source_name} to {target_name}")
-                    response_messages = target_agent.process_message(messages)
+                    response_messages = await target_agent.process_message(messages)
 
                     if response_messages:
-                        self._route_messages(edge.target_node, target_name, response_messages)
+                        await self._route_messages(edge.target_node, target_name, response_messages)
 
             elif target_node.type == NodeType.WAIT_AND_COMBINE:
                 # Deliver to WaitAndCombine node
-                self._deliver_to_wait_and_combine(edge.target_node, source_node_id, messages)
+                await self._deliver_to_wait_and_combine(edge.target_node, source_node_id, messages)
 
-    def send_user_message(self, content: str, user: str = "User") -> list[dict]:
+    async def send_user_message(self, content: str, user: str = "User") -> list[dict]:
         """Send a message from user input to connected nodes (agents or WaitAndCombine)."""
         responses = []
 
@@ -554,7 +573,7 @@ class AgentGraphRuntime:
                 agent_node = self._current_agent_graph.get_node(agent_id)
                 agent_name = agent_node.config.name if agent_node else "Agent"
 
-                response_messages = agent.process_message(messages)
+                response_messages = await agent.process_message(messages)
 
                 if response_messages:
                     responses.append({
@@ -562,7 +581,7 @@ class AgentGraphRuntime:
                         "agent_name": agent_name,
                         "response": response_messages[0]["content"],
                     })
-                    self._route_messages(agent_id, agent_name, response_messages)
+                    await self._route_messages(agent_id, agent_name, response_messages)
         else:
             # Route through user input node's connections
             for edge in self._current_agent_graph.edges:
@@ -581,7 +600,7 @@ class AgentGraphRuntime:
                         agent_config = target_node.config if isinstance(target_node.config, dict) else target_node.config.model_dump()
                         agent_name = agent_config.get("name", "Agent")
 
-                        response_messages = agent.process_message(messages)
+                        response_messages = await agent.process_message(messages)
 
                         if response_messages:
                             responses.append({
@@ -589,45 +608,13 @@ class AgentGraphRuntime:
                                 "agent_name": agent_name,
                                 "response": response_messages[0]["content"],
                             })
-                            self._route_messages(edge.target_node, agent_name, response_messages)
+                            await self._route_messages(edge.target_node, agent_name, response_messages)
 
                 elif target_node.type == NodeType.WAIT_AND_COMBINE:
                     # Deliver to WaitAndCombine node
-                    self._deliver_to_wait_and_combine(edge.target_node, user_input_node.id, messages)
+                    await self._deliver_to_wait_and_combine(edge.target_node, user_input_node.id, messages)
 
         return responses
-
-    # === Persistence ===
-
-    def persist_node_data(self, node_id: str) -> None:
-        """Persist a node's data to disk."""
-        if not self._current_agent_graph or not self._current_project_id:
-            return
-
-        node = self._current_agent_graph.get_node(node_id)
-        if not node:
-            return
-
-        if node.type == NodeType.KNOWLEDGE_GRAPH:
-            kg = self.knowledge_graphs.get(node_id)
-            if kg is not None:
-                self.storage.save_knowledge_graph(self._current_project_id, node_id, kg)
-                logger.debug(f"Persisted KG node {node_id} with {len(kg)} entities")
-            else:
-                logger.warning(f"Knowledge graph node {node_id} not found in runtime")
-
-        elif node.type == NodeType.MEMORY_STREAM:
-            ms = self.memory_streams.get(node_id)
-            if ms is not None:
-                self.storage.save_memory_stream(self._current_project_id, node_id, ms)
-
-    def persist_all(self) -> None:
-        """Persist all node data."""
-        if not self._current_agent_graph:
-            return
-
-        for node in self._current_agent_graph.nodes:
-            self.persist_node_data(node.id)
 
     # === Query Methods ===
 
@@ -646,4 +633,3 @@ class AgentGraphRuntime:
                     "state": "running",
                 })
         return agents
-

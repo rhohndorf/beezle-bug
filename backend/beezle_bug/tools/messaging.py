@@ -14,7 +14,7 @@ class SendMessage(Tool):
     contact: str = Field(..., description="The name of the contact to send a message to")
     message: str = Field(..., description="The message you want to send to the contact")
 
-    def run(self, agent):
+    async def run(self, agent):
 
         if self.contact not in agent.contacts:
             return f"Error: {self.contact} is not a valid contact. Valid contacts are {list(agent.contacts)}"

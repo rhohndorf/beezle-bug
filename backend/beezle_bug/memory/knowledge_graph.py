@@ -3,11 +3,16 @@ Knowledge graph module for structured information storage.
 
 This module implements a knowledge graph using NetworkX for graph operations,
 providing efficient traversal, path finding, and query capabilities.
+
+When a storage backend is provided, all mutations are persisted immediately.
 """
 
 import json
-from typing import Optional, List, Dict, Any, Set
+from typing import TYPE_CHECKING, Optional, List, Dict, Any, Set
 import networkx as nx
+
+if TYPE_CHECKING:
+    from beezle_bug.storage.base import StorageBackend
 
 
 class KnowledgeGraph:
@@ -21,17 +26,32 @@ class KnowledgeGraph:
     This provides structured storage separate from the conversational
     memory stream, useful for facts, concepts, and their relationships.
     
+    When initialized with a storage backend, all mutations are persisted
+    immediately to the database.
+    
     Attributes:
         graph: NetworkX DiGraph storing entities as nodes and relationships as edges
     """
     
-    def __init__(self):
-        """Initialize an empty knowledge graph."""
+    def __init__(
+        self,
+        storage: Optional["StorageBackend"] = None,
+        kg_id: Optional[int] = None
+    ):
+        """
+        Initialize a knowledge graph.
+        
+        Args:
+            storage: Optional storage backend for persistence
+            kg_id: Database ID of this knowledge graph (required if storage is provided)
+        """
         self.graph = nx.DiGraph()
+        self._storage = storage
+        self._kg_id = kg_id
 
     # ========== Entity Operations ==========
     
-    def add_entity(self, entity: str, properties: dict) -> str:
+    async def add_entity(self, entity: str, properties: dict) -> str:
         """
         Add a new entity with properties to the graph.
         
@@ -46,9 +66,14 @@ class KnowledgeGraph:
             return f"Error: Entity '{entity}' already exists."
 
         self.graph.add_node(entity, **properties)
+        
+        # Persist to database
+        if self._storage and self._kg_id:
+            await self._storage.kg_add_entity(self._kg_id, entity, properties)
+        
         return f"Entity '{entity}' added successfully."
 
-    def add_entity_property(self, entity: str, property: str, value: str) -> str:
+    async def add_entity_property(self, entity: str, property: str, value: str) -> str:
         """
         Add or update a property on an existing entity.
         
@@ -64,6 +89,11 @@ class KnowledgeGraph:
             return f"Error: Entity '{entity}' does not exist."
 
         self.graph.nodes[entity][property] = value
+        
+        # Persist to database
+        if self._storage and self._kg_id:
+            await self._storage.kg_add_entity_property(self._kg_id, entity, property, value)
+        
         return f"Property {property} set to {value} on entity {entity}"
 
     def get_entity(self, entity: str) -> dict | str:
@@ -80,7 +110,7 @@ class KnowledgeGraph:
             return f"Error: Entity '{entity}' not found."
         return dict(self.graph.nodes[entity])
 
-    def remove_entity(self, entity: str) -> str:
+    async def remove_entity(self, entity: str) -> str:
         """
         Remove an entity and all its relationships from the graph.
         
@@ -94,9 +124,14 @@ class KnowledgeGraph:
             return f"Error: Entity '{entity}' does not exist."
 
         self.graph.remove_node(entity)
+        
+        # Persist to database
+        if self._storage and self._kg_id:
+            await self._storage.kg_remove_entity(self._kg_id, entity)
+        
         return f"Entity '{entity}' and all its relationships removed successfully."
 
-    def remove_entity_property(self, entity: str, property: str) -> str:
+    async def remove_entity_property(self, entity: str, property: str) -> str:
         """
         Remove a property from an entity.
         
@@ -114,11 +149,16 @@ class KnowledgeGraph:
             return f"Error: Property '{property}' does not exist on entity '{entity}'."
         
         del self.graph.nodes[entity][property]
+        
+        # Persist to database
+        if self._storage and self._kg_id:
+            await self._storage.kg_remove_entity_property(self._kg_id, entity, property)
+        
         return f"Property '{property}' removed from entity '{entity}'."
 
     # ========== Relationship Operations ==========
 
-    def add_relationship(
+    async def add_relationship(
         self,
         entity1: str,
         relationship: str,
@@ -154,12 +194,20 @@ class KnowledgeGraph:
         props = properties or {}
         props['relationship'] = relationship
         self.graph.add_edge(entity1, entity2, **props)
+        
+        # Persist to database (don't include 'relationship' key in properties for DB)
+        if self._storage and self._kg_id:
+            db_props = {k: v for k, v in props.items() if k != 'relationship'}
+            await self._storage.kg_add_relationship(
+                self._kg_id, entity1, relationship, entity2, db_props
+            )
+        
         return (
             f"Relationship '{entity1} --({relationship})--> {entity2}' "
             f"added successfully."
         )
 
-    def add_relationship_property(
+    async def add_relationship_property(
         self,
         entity1: str,
         relationship: str,
@@ -194,6 +242,13 @@ class KnowledgeGraph:
             )
 
         self.graph.edges[entity1, entity2][property] = value
+        
+        # Persist to database
+        if self._storage and self._kg_id:
+            await self._storage.kg_update_relationship_property(
+                self._kg_id, entity1, relationship, entity2, property, value
+            )
+        
         return (
             f"Property '{property}' set to '{value}' on relationship "
             f"'{entity1} --({relationship})--> {entity2}'"
@@ -268,7 +323,7 @@ class KnowledgeGraph:
         
         return results
 
-    def remove_relationship(
+    async def remove_relationship(
         self,
         entity1: str,
         relationship: str,
@@ -299,12 +354,19 @@ class KnowledgeGraph:
             )
 
         self.graph.remove_edge(entity1, entity2)
+        
+        # Persist to database
+        if self._storage and self._kg_id:
+            await self._storage.kg_remove_relationship(
+                self._kg_id, entity1, relationship, entity2
+            )
+        
         return (
             f"Relationship '{entity1} --({relationship})--> {entity2}' "
             f"removed successfully."
         )
 
-    def remove_relationship_property(
+    async def remove_relationship_property(
         self,
         entity1: str,
         relationship: str,
@@ -343,12 +405,19 @@ class KnowledgeGraph:
             )
         
         del self.graph.edges[entity1, entity2][property]
+        
+        # Persist to database
+        if self._storage and self._kg_id:
+            await self._storage.kg_remove_relationship_property(
+                self._kg_id, entity1, relationship, entity2, property
+            )
+        
         return (
             f"Property '{property}' removed from relationship "
             f"'{entity1} --({relationship})--> {entity2}'."
         )
 
-    # ========== Query Operations ==========
+    # ========== Query Operations (sync - operate on in-memory graph) ==========
 
     def find_entities_by_type(self, entity_type: str) -> List[str]:
         """
@@ -672,9 +741,10 @@ class KnowledgeGraph:
             kg.graph.add_node(entity, **properties)
         
         for rel in data.get("relationships", []):
-            e1 = rel.pop("entity1")
-            e2 = rel.pop("entity2")
-            kg.graph.add_edge(e1, e2, **rel)
+            rel_copy = dict(rel)
+            e1 = rel_copy.pop("entity1")
+            e2 = rel_copy.pop("entity2")
+            kg.graph.add_edge(e1, e2, **rel_copy)
         
         return kg
 

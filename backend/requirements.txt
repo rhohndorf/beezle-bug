@@ -2,14 +2,17 @@
 litellm>=1.0.0
 openai>=1.0.0
 
-# Web Framework
-flask>=3.0.0
-flask-socketio>=5.3.0
-flask-cors>=4.0.0
-eventlet>=0.33.0
+# Web Framework (FastAPI + async SocketIO)
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-socketio[asyncio]>=5.10.0
 
 # Data Models
 pydantic>=2.0.0
+
+# Database (async SQLite + vector search)
+aiosqlite>=0.19.0
+sqlite-vec>=0.1.0
 
 # Memory & Embeddings
 fastembed>=0.2.0
@@ -35,3 +38,7 @@ webrtcvad>=2.0.10
 
 # Voice / TTS
 piper-tts>=1.2.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
