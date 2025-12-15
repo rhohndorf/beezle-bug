@@ -10,12 +10,10 @@ class AddEntity(Tool):
 
     name: str = Field(description="The name of the entity.")
     type: str = Field(description="The type of the entity (e.g. Person, City, Company, etc).")
-    # properties: dict = Field(default_factory=dict, description="Optional properties for the entity.")
 
-    def run(self, agent):
-        # Directly use agent's knowledge graph and return the result
+    async def run(self, agent):
         entity = {"name": self.name, "type": self.type}
-        return agent.knowledge_graph.add_entity(self.name, entity)
+        return await agent.knowledge_graph.add_entity(self.name, entity)
 
 
 class AddPropertyToEntity(Tool):
@@ -27,9 +25,8 @@ class AddPropertyToEntity(Tool):
     property: str = Field(description="The property name")
     value: str = Field(description="The property value")
 
-    def run(self, agent):
-        # Directly use agent's knowledge graph and return the result
-        return agent.knowledge_graph.add_entity_property(self.entity, self.property, self.value)
+    async def run(self, agent):
+        return await agent.knowledge_graph.add_entity_property(self.entity, self.property, self.value)
 
 
 class AddRelationship(Tool):
@@ -41,22 +38,8 @@ class AddRelationship(Tool):
     relationship: str = Field(..., description="The type of relationship.")
     entity2: str = Field(..., description="The target entity of the relationship.")
 
-    def run(self, agent):
-        # Directly use agent's knowledge graph and return the result
-        return agent.knowledge_graph.add_relationship(self.entity1, self.relationship, self.entity2)
-
-
-# class UpdateEntityProperty(Tool):
-#     """
-#     Update properties for an existing entity in the knowledge graph.
-#     """
-
-#     entity: str = Field(..., description="The entity whose properties will be updated.")
-#     properties: dict = Field(..., description="New properties to add or update for the entity.")
-
-#     def run(self, agent):
-#         # Directly use agent's knowledge graph and return the result
-#         return agent.knowledge_graph.update_entity_properties(self.entity, self.properties)
+    async def run(self, agent):
+        return await agent.knowledge_graph.add_relationship(self.entity1, self.relationship, self.entity2)
 
 
 class GetEntity(Tool):
@@ -66,8 +49,8 @@ class GetEntity(Tool):
 
     entity: str = Field(None, description="The entity to retrieve")
 
-    def run(self, agent):
-        # Directly use agent's knowledge graph and return the result
+    async def run(self, agent):
+        # get_entity is sync (operates on in-memory graph)
         return agent.knowledge_graph.get_entity(self.entity)
 
 
@@ -80,8 +63,8 @@ class GetRelationships(Tool):
         None, description="The entity whose relationships to retrieve. If None, retrieves all relationships."
     )
 
-    def run(self, agent):
-        # Directly use agent's knowledge graph and return the result
+    async def run(self, agent):
+        # get_relationships is sync (operates on in-memory graph)
         return agent.knowledge_graph.get_relationships(self.entity)
 
 
@@ -95,8 +78,8 @@ class RemoveRelationship(Tool):
     relationship: str = Field(..., description="The type of relationship to remove.")
     entity2: str = Field(..., description="The target entity of the relationship to remove.")
 
-    def run(self, agent):
-        return agent.knowledge_graph.remove_relationship(self.entity1, self.relationship, self.entity2)
+    async def run(self, agent):
+        return await agent.knowledge_graph.remove_relationship(self.entity1, self.relationship, self.entity2)
 
 
 class RemoveEntity(Tool):
@@ -107,8 +90,8 @@ class RemoveEntity(Tool):
 
     entity: str = Field(..., description="The name of the entity to remove.")
 
-    def run(self, agent):
-        return agent.knowledge_graph.remove_entity(self.entity)
+    async def run(self, agent):
+        return await agent.knowledge_graph.remove_entity(self.entity)
 
 
 class RemoveEntityProperty(Tool):
@@ -120,8 +103,8 @@ class RemoveEntityProperty(Tool):
     entity: str = Field(..., description="The name of the entity.")
     property: str = Field(..., description="The property name to remove.")
 
-    def run(self, agent):
-        return agent.knowledge_graph.remove_entity_property(self.entity, self.property)
+    async def run(self, agent):
+        return await agent.knowledge_graph.remove_entity_property(self.entity, self.property)
 
 
 class AddPropertyToRelationship(Tool):
@@ -136,8 +119,8 @@ class AddPropertyToRelationship(Tool):
     property: str = Field(..., description="The property name to add.")
     value: str = Field(..., description="The property value.")
 
-    def run(self, agent):
-        return agent.knowledge_graph.add_relationship_property(
+    async def run(self, agent):
+        return await agent.knowledge_graph.add_relationship_property(
             self.entity1, self.relationship, self.entity2, self.property, self.value
         )
 
@@ -151,7 +134,8 @@ class GetRelationship(Tool):
     relationship: str = Field(..., description="The type of relationship.")
     entity2: str = Field(..., description="The target entity of the relationship.")
 
-    def run(self, agent):
+    async def run(self, agent):
+        # get_relationship is sync (operates on in-memory graph)
         return agent.knowledge_graph.get_relationship(self.entity1, self.relationship, self.entity2)
 
 
@@ -165,13 +149,13 @@ class RemoveRelationshipProperty(Tool):
     entity2: str = Field(..., description="The target entity of the relationship.")
     property: str = Field(..., description="The property name to remove.")
 
-    def run(self, agent):
-        return agent.knowledge_graph.remove_relationship_property(
+    async def run(self, agent):
+        return await agent.knowledge_graph.remove_relationship_property(
             self.entity1, self.relationship, self.entity2, self.property
         )
 
 
-# ========== Query Tools ==========
+# ========== Query Tools (sync - operate on in-memory graph) ==========
 
 class FindEntitiesByType(Tool):
     """
@@ -181,7 +165,7 @@ class FindEntitiesByType(Tool):
 
     entity_type: str = Field(..., description="The type to search for (e.g., 'person', 'city', 'organization').")
 
-    def run(self, agent):
+    async def run(self, agent):
         results = agent.knowledge_graph.find_entities_by_type(self.entity_type)
         if not results:
             return f"No entities of type '{self.entity_type}' found."
@@ -201,7 +185,7 @@ class FindEntitiesByProperty(Tool):
         description="Comparison operator: 'eq' (equals), 'contains' (substring), 'gt' (greater than), 'lt' (less than), 'exists' (property exists)."
     )
 
-    def run(self, agent):
+    async def run(self, agent):
         results = agent.knowledge_graph.find_entities_by_property(
             self.property, self.value, self.operator
         )
@@ -218,7 +202,7 @@ class FindRelationshipsByType(Tool):
 
     relationship_type: str = Field(..., description="The relationship type to search for (e.g., 'lives_in', 'works_at').")
 
-    def run(self, agent):
+    async def run(self, agent):
         results = agent.knowledge_graph.find_relationships_by_type(self.relationship_type)
         if not results:
             return f"No relationships of type '{self.relationship_type}' found."
@@ -241,7 +225,7 @@ class GetNeighbors(Tool):
         description="Optional: filter by relationship type."
     )
 
-    def run(self, agent):
+    async def run(self, agent):
         results = agent.knowledge_graph.get_neighbors(
             self.entity, self.direction, self.relationship_type
         )
@@ -260,7 +244,7 @@ class FindPath(Tool):
     entity2: str = Field(..., description="The target entity.")
     max_depth: int = Field(default=10, description="Maximum path length to search.")
 
-    def run(self, agent):
+    async def run(self, agent):
         return agent.knowledge_graph.find_path(self.entity1, self.entity2, self.max_depth)
 
 
@@ -273,7 +257,7 @@ class GetConnectedEntities(Tool):
     entity: str = Field(..., description="The starting entity.")
     max_depth: int = Field(default=2, description="Maximum number of hops (1-5 recommended).")
 
-    def run(self, agent):
+    async def run(self, agent):
         results = agent.knowledge_graph.get_connected_entities(self.entity, self.max_depth)
         if not results:
             return f"No connected entities found for '{self.entity}'."
@@ -288,7 +272,7 @@ class GetMostConnected(Tool):
 
     n: int = Field(default=10, description="Number of entities to return.")
 
-    def run(self, agent):
+    async def run(self, agent):
         results = agent.knowledge_graph.get_most_connected(self.n)
         if not results:
             return "The knowledge graph is empty."
@@ -301,7 +285,7 @@ class GetIsolatedEntities(Tool):
     Use this to find orphaned entities that might need connections.
     """
 
-    def run(self, agent):
+    async def run(self, agent):
         results = agent.knowledge_graph.get_isolated_entities()
         if not results:
             return "No isolated entities found. All entities are connected."
@@ -314,7 +298,7 @@ class CheckGraphConnectivity(Tool):
     Use this to verify graph integrity and find disconnected subgraphs.
     """
 
-    def run(self, agent):
+    async def run(self, agent):
         is_connected = agent.knowledge_graph.is_connected()
         if is_connected:
             return "The knowledge graph is fully connected."

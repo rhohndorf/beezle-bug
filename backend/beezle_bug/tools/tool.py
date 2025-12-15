@@ -11,33 +11,40 @@ class Tool(ABC, BaseModel):
     Subclasses must implement the `run` method to define the functionality
     of the tool.
 
+    All tool run methods are async to support async storage operations.
+
     Attributes:
         No attributes defined in this abstract base class.
 
     Methods:
-        run: Abstract method that must be implemented by subclasses to define
+        run: Abstract async method that must be implemented by subclasses to define
              the functionality of the tool.
 
     Example:
         ```python
-        from abc import ABC, abstractmethod
-        from pydantic import BaseModel
+        from beezle_bug.tools import Tool
 
         class MyTool(Tool):
-            def run(self):
+            async def run(self, agent):
                 # Define functionality of the tool
-                pass
+                return "result"
         ```
 
     """
 
     @abstractmethod
-    def run(self, agent) -> Optional[Any]:
+    async def run(self, agent) -> Optional[Any]:
         """
-        Abstract method to be implemented by subclasses.
+        Abstract async method to be implemented by subclasses.
 
         This method defines the functionality of the tool. Subclasses must
         override this method to provide specific implementation.
+
+        Args:
+            agent: The agent executing this tool
+
+        Returns:
+            The result of the tool execution
 
         Raises:
             NotImplementedError: This method must be implemented by subclasses.

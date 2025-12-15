@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../lib/socket';
-import { Bot, Brain, Database, MessageCircle, Monitor, Wrench, Clock, Box, Share2, X, GitMerge } from 'lucide-react';
+import { Bot, Brain, Database, MessageCircle, Monitor, Wrench, Clock, Box, Share2, X, GitMerge, Mic } from 'lucide-react';
 
 const NODE_ICONS = {
   agent: Bot,
   knowledge_graph: Brain,
   memory_stream: Database,
   toolbox: Wrench,
-  user_input: MessageCircle,
-  user_output: Monitor,
+  text_input: MessageCircle,
+  voice_input: Mic,
+  text_output: Monitor,
   scheduled_event: Clock,
   wait_and_combine: GitMerge,
 };
@@ -18,8 +19,9 @@ const NODE_COLORS = {
   knowledge_graph: '#a855f7',
   memory_stream: '#22c55e',
   toolbox: '#f97316',
-  user_input: '#eab308',
-  user_output: '#ef4444',
+  text_input: '#eab308',
+  voice_input: '#8b5cf6',
+  text_output: '#ef4444',
   scheduled_event: '#06b6d4',
   wait_and_combine: '#ec4899',
 };
@@ -416,10 +418,12 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
           </div>
         )}
 
-        {/* User Input/Output - minimal config */}
-        {(selectedNode.type === 'user_input' || selectedNode.type === 'user_output') && (
+        {/* Text/Voice Input/Output - minimal config */}
+        {(selectedNode.type === 'text_input' || selectedNode.type === 'voice_input' || selectedNode.type === 'text_output') && (
           <div className="text-xs text-[#555]">
-            This node connects the agent graph to the chat interface.
+            {selectedNode.type === 'text_input' && 'Routes typed text from the chat input field.'}
+            {selectedNode.type === 'voice_input' && 'Routes voice-transcribed text from speech input.'}
+            {selectedNode.type === 'text_output' && 'Displays agent responses in the chat.'}
           </div>
         )}
 

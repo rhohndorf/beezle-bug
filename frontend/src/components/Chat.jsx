@@ -330,8 +330,14 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
   
   // Get STT settings and listen for changes
   useEffect(() => {
+    // Project-level settings (device, wake words, etc.) - NOT the enabled state
     const handleSttSettings = (data) => {
       setSttSettings(data);
+      // Don't set sttEnabled from project settings - it's per-client
+    };
+    
+    // Per-client STT enabled state (from VoiceSettingsTab toggle)
+    const handleSttEnabledChanged = (data) => {
       setSttEnabled(data.enabled);
     };
     
@@ -363,21 +369,32 @@ export default function Chat({ agentStatus, messages, setMessages, isDeployed = 
       setSkipWakeWord(data.enabled);
     };
     
+    // Handle final transcribed text from server - route through VoiceInput node
+    const handleSttFinalText = (data) => {
+      if (data.text && data.text.trim()) {
+        socket.emit('send_voice_message', { user: 'User', message: data.text });
+      }
+    };
+    
     socket.on('stt_settings', handleSttSettings);
+    socket.on('stt_enabled_changed', handleSttEnabledChanged);
     socket.on('voice_state_change', handleVoiceStateChange);
     socket.on('stt_status', handleSttStatus);
     socket.on('stt_activated', handleSttActivated);
     socket.on('stt_deactivated', handleSttDeactivated);
     socket.on('skip_wake_word_changed', handleSkipWakeWordChanged);
+    socket.on('stt_final_text', handleSttFinalText);
     socket.emit('get_stt_settings');
     
     return () => {
       socket.off('stt_settings', handleSttSettings);
+      socket.off('stt_enabled_changed', handleSttEnabledChanged);
       socket.off('voice_state_change', handleVoiceStateChange);
       socket.off('stt_status', handleSttStatus);
       socket.off('stt_activated', handleSttActivated);
       socket.off('stt_deactivated', handleSttDeactivated);
       socket.off('skip_wake_word_changed', handleSkipWakeWordChanged);
+      socket.off('stt_final_text', handleSttFinalText);
     };
   }, []);
   

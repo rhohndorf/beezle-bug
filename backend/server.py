@@ -1,5 +1,5 @@
 """
-WebSocket server for Beezle Bug.
+WebSocket server for Beezle Bug using FastAPI + python-socketio.
 
 Handles:
 - Agent lifecycle management via AgentManager
@@ -8,23 +8,24 @@ Handles:
 - Event forwarding for introspection
 """
 
-# Monkey-patch must be first for eventlet to work with threads
-import eventlet
-eventlet.monkey_patch()
-
 import os
-from loguru import logger
+import base64
+import asyncio
 from pathlib import Path
-from flask import Flask, render_template
-from flask_socketio import SocketIO, emit
-from flask_cors import CORS
+from contextlib import asynccontextmanager
+from typing import Optional
+
+from loguru import logger
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import socketio
 
 from beezle_bug import constants as const
 from beezle_bug.events import EventBus
 from beezle_bug.scheduler import Scheduler
 from beezle_bug.template import TemplateLoader
 from beezle_bug.tools.toolbox_factory import ToolboxFactory
-from beezle_bug.storage import StorageService
+from beezle_bug.storage import get_storage_backend
 from beezle_bug.project_manager import ProjectManager
 from beezle_bug.agent_graph import (
     AgentGraphRuntime,
@@ -37,33 +38,32 @@ from beezle_bug.agent_graph import (
     KnowledgeGraphNodeConfig,
     MemoryStreamNodeConfig,
     ToolboxNodeConfig,
-    UserInputNodeConfig,
-    UserOutputNodeConfig,
+    TextInputNodeConfig,
+    VoiceInputNodeConfig,
+    TextOutputNodeConfig,
     ScheduledEventNodeConfig,
     WaitAndCombineNodeConfig,
 )
 from beezle_bug.project import TTSSettings, STTSettings
 from beezle_bug.voice.tts import PiperTTS, get_tts, PIPER_AVAILABLE
 
-import base64
-
-app = Flask(__name__)
-app.config["SECRET_KEY"] = "beezle-secret"
-CORS(app)
-socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")
 
 # Data directory for persistence
 DATA_DIR = Path(os.environ.get("BEEZLE_DATA_DIR", const.DEFAULT_DATA_DIR))
+DB_BACKEND = os.environ.get("BEEZLE_DB_BACKEND", "sqlite")
 
-# Global components
-event_bus = EventBus()
-scheduler = Scheduler(tick_interval=1.0)
-toolbox_factory = ToolboxFactory()
-template_loader = TemplateLoader(DATA_DIR)
+# Global components (initialized in lifespan)
+event_bus: EventBus = None
+scheduler: Scheduler = None
+toolbox_factory: ToolboxFactory = None
+template_loader: TemplateLoader = None
+storage = None
+runtime: AgentGraphRuntime = None
+project_manager: ProjectManager = None
 
 # TTS State
 tts_enabled = False
-tts_instance: PiperTTS = None
+tts_instance: Optional[PiperTTS] = None
 
 # Per-session client preferences
 _client_preferences = {}  # sid -> {"tts_enabled": bool}
@@ -72,54 +72,92 @@ _client_preferences = {}  # sid -> {"tts_enabled": bool}
 def event_handler(event):
     """Forward agent events to connected clients."""
     try:
-        socketio.emit('agent_event', event.to_dict())
+        asyncio.create_task(sio.emit('agent_event', event.to_dict()))
     except Exception as e:
         logger.error(f"Failed to emit event: {e}")
 
 
-
-# Initialize Storage, Runtime, and ProjectManager
-def on_agent_graph_message(agent_id: str, agent_name: str, message: str):
-    """Callback for agent graph messages from scheduled events etc.
-    
-    For user-initiated messages, responses are handled directly in handle_message
-    with per-client TTS preferences. This callback handles non-user-initiated
-    messages (scheduled events, etc.) and broadcasts text-only to all clients.
-    """
+async def on_agent_graph_message(agent_id: str, agent_name: str, message: str):
+    """Callback for agent graph messages from scheduled events etc."""
     msg_data = {
         "agentId": agent_id,
         "user": agent_name,
         "message": message,
         "source": "agent_graph"
     }
+    await sio.emit("chat_message", msg_data)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan - initialize and cleanup resources."""
+    global event_bus, scheduler, toolbox_factory, template_loader
+    global storage, runtime, project_manager
     
-    socketio.emit("chat_message", msg_data)
+    logger.info("Initializing Beezle Bug server...")
+    
+    # Initialize components
+    event_bus = EventBus()
+    scheduler = Scheduler(tick_interval=1.0)
+    toolbox_factory = ToolboxFactory()
+    template_loader = TemplateLoader(DATA_DIR)
+    
+    # Initialize storage backend
+    db_path = DATA_DIR / "beezle.db"
+    storage = await get_storage_backend(DB_BACKEND, db_path=str(db_path))
+    
+    # Initialize runtime and project manager
+    runtime = AgentGraphRuntime(
+        storage=storage,
+        event_bus=event_bus,
+        scheduler=scheduler,
+        template_loader=template_loader,
+        toolbox_factory=toolbox_factory,
+        on_agent_graph_message=lambda aid, name, msg: asyncio.create_task(
+            on_agent_graph_message(aid, name, msg)
+        ),
+    )
+    
+    project_manager = ProjectManager(storage=storage, runtime=runtime)
+    
+    # Subscribe to all events
+    event_bus.subscribe_all(event_handler)
+    
+    # Start scheduler
+    scheduler.start()
+    
+    logger.info(f"Server initialized. Data directory: {DATA_DIR}")
+    
+    yield
+    
+    # Cleanup
+    logger.info("Shutting down Beezle Bug server...")
+    scheduler.stop()
+    await storage.close()
 
 
-storage = StorageService(data_dir=DATA_DIR)
-
-runtime = AgentGraphRuntime(
-    storage=storage,
-    event_bus=event_bus,
-    scheduler=scheduler,
-    template_loader=template_loader,
-    toolbox_factory=toolbox_factory,
-    on_agent_graph_message=on_agent_graph_message,
+# Create FastAPI app
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-project_manager = ProjectManager(storage=storage, runtime=runtime)
-
-# Subscribe to all events
-event_bus.subscribe_all(event_handler)
-
-# Start scheduler
-scheduler.start()
+# Create async Socket.IO server
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins="*",
+)
+socket_app = socketio.ASGIApp(sio, app)
 
 
 # ==================== Helper Functions ====================
 
-def get_agent_graph_state() -> dict:
-    """Get the current agent graph state for the frontend."""
+def _build_agent_graph_state() -> dict:
+    """Build the current agent graph state for the frontend."""
     if not project_manager.current_project:
         return {"nodes": [], "edges": [], "is_deployed": False}
 
@@ -152,161 +190,180 @@ def get_agent_graph_state() -> dict:
     }
 
 
-# ==================== Routes ====================
+# ==================== Socket.IO Event Handlers ====================
 
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
-# ==================== WebSocket Handlers ====================
-
-@socketio.on("connect")
-def handle_connect():
-    logger.info("Client connected")
+@sio.event
+async def connect(sid, environ):
+    logger.info(f"Client connected: {sid}")
 
 
-@socketio.on("disconnect")
-def handle_disconnect():
-    from flask import request
-    sid = request.sid
+@sio.event
+async def disconnect(sid):
     _client_preferences.pop(sid, None)
     logger.info(f"Client disconnected: {sid}")
 
 
 # ==================== Tools & Templates ====================
 
-@socketio.on("get_tools")
-def handle_get_tools():
+@sio.event
+async def get_tools(sid):
     """Get all available tools and presets."""
-    emit("tools_list", {
+    await sio.emit("tools_list", {
         "tools": toolbox_factory.list_tools(),
         "presets": {
             name: toolbox_factory.get_preset(name) 
             for name in toolbox_factory.list_presets()
         }
-    })
+    }, room=sid)
 
 
-@socketio.on("get_templates")
-def handle_get_templates():
+@sio.event
+async def get_templates(sid):
     """Get all available system message templates."""
-    emit("templates_list", {
+    await sio.emit("templates_list", {
         "templates": template_loader.list_templates()
-    })
+    }, room=sid)
 
 
-@socketio.on("get_template_content")
-def handle_get_template_content(data):
+@sio.event
+async def get_template_content(sid, data):
     """Get the raw content of a specific template."""
     name = data.get("name")
     if not name:
-        emit("error", {"message": "Template name required"})
+        await sio.emit("error", {"message": "Template name required"}, room=sid)
         return
     
     try:
         content = template_loader.get_content(name)
-        emit("template_content", {
+        await sio.emit("template_content", {
             "name": name,
             "content": content
-        })
+        }, room=sid)
     except FileNotFoundError as e:
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
-@socketio.on("save_template")
-def handle_save_template(data):
+@sio.event
+async def save_template(sid, data):
     """Create or update a template file."""
     name = data.get("name")
     content = data.get("content")
     
     if not name:
-        emit("error", {"message": "Template name required"})
+        await sio.emit("error", {"message": "Template name required"}, room=sid)
         return
     if content is None:
-        emit("error", {"message": "Template content required"})
+        await sio.emit("error", {"message": "Template content required"}, room=sid)
         return
     
     try:
         template_loader.save(name, content)
-        emit("template_saved", {"name": name})
-        socketio.emit("log", {"type": "success", "message": f"Template saved: {name}"})
-        # Also emit updated template list
-        emit("templates_list", {"templates": template_loader.list_templates()})
+        await sio.emit("template_saved", {"name": name}, room=sid)
+        await sio.emit("log", {"type": "success", "message": f"Template saved: {name}"})
+        await sio.emit("templates_list", {"templates": template_loader.list_templates()}, room=sid)
     except Exception as e:
         logger.error(f"Failed to save template: {e}")
-        emit("error", {"message": f"Failed to save template: {e}"})
+        await sio.emit("error", {"message": f"Failed to save template: {e}"}, room=sid)
 
 
-@socketio.on("delete_template")
-def handle_delete_template(data):
+@sio.event
+async def delete_template(sid, data):
     """Delete a template file."""
     name = data.get("name")
     if not name:
-        emit("error", {"message": "Template name required"})
+        await sio.emit("error", {"message": "Template name required"}, room=sid)
         return
     
     try:
         template_loader.delete(name)
-        emit("template_deleted", {"name": name})
-        socketio.emit("log", {"type": "success", "message": f"Template deleted: {name}"})
-        # Also emit updated template list
-        emit("templates_list", {"templates": template_loader.list_templates()})
+        await sio.emit("template_deleted", {"name": name}, room=sid)
+        await sio.emit("log", {"type": "success", "message": f"Template deleted: {name}"})
+        await sio.emit("templates_list", {"templates": template_loader.list_templates()}, room=sid)
     except FileNotFoundError as e:
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
     except Exception as e:
         logger.error(f"Failed to delete template: {e}")
-        emit("error", {"message": f"Failed to delete template: {e}"})
+        await sio.emit("error", {"message": f"Failed to delete template: {e}"}, room=sid)
+
 
 # ==================== Chat ====================
 
-@socketio.on("send_message")
-def handle_message(data):
+@sio.event
+async def send_message(sid, data):
     """Handle chat messages from users."""
-    from flask import request
-    sid = request.sid
+    global tts_instance
     
     logger.info(f"Message from {sid}: {data}")
-    emit("chat_message", data)  # Echo user message to sender
+    await sio.emit("chat_message", data, room=sid)  # Echo user message to sender
+    # Force event loop to flush the socket buffer before starting agent processing
+    await asyncio.sleep(0.01)
     
     user = data.get("user", "User")
     message = data.get("message", "")
-    target_agent_id = data.get("agentId")
     
     # If an agent graph project is active, route through it
     if project_manager.current_project and runtime.agents:
-        def process_agent_graph():
-            global tts_instance
-            
-            responses = runtime.send_user_message(message, user)
-            # Text is broadcast to all via on_agent_graph_message callback
-            # Here we only handle audio for the requesting client
-            
-            for resp in responses:
-                logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
-                
-                # Check this client's TTS preference (per-client only, no global check)
-                prefs = _client_preferences.get(sid, {})
-                if prefs.get("tts_enabled") and tts_instance is not None:
-                    try:
-                        audio_bytes = tts_instance.synthesize(resp["response"])
-                        if audio_bytes:
-                            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-                            socketio.emit("tts_audio", {
-                                "audioUrl": f"data:audio/wav;base64,{audio_b64}"
-                            }, room=sid)
-                            logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
-                    except Exception as e:
-                        logger.error(f"TTS synthesis failed: {e}")
+        responses = await runtime.send_user_message(message, user)
         
-        socketio.start_background_task(process_agent_graph)
-        return
+        for resp in responses:
+            logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
+            
+            # Check this client's TTS preference
+            prefs = _client_preferences.get(sid, {})
+            if prefs.get("tts_enabled") and tts_instance is not None:
+                try:
+                    audio_bytes = tts_instance.synthesize(resp["response"])
+                    if audio_bytes:
+                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                        await sio.emit("tts_audio", {
+                            "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                        }, room=sid)
+                        logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
+                except Exception as e:
+                    logger.error(f"TTS synthesis failed: {e}")
+
+
+@sio.event
+async def send_voice_message(sid, data):
+    """Handle voice-transcribed messages from users (routes through VoiceInput node)."""
+    global tts_instance
+    
+    logger.info(f"Voice message from {sid}: {data}")
+    # Broadcast user message to ALL clients immediately (before agent processing)
+    await sio.emit("chat_message", data)
+    # Force event loop to flush the socket buffer before starting agent processing
+    await asyncio.sleep(0.01)
+    logger.debug(f"Broadcasted voice message to all clients")
+    
+    user = data.get("user", "User")
+    message = data.get("message", "")
+    
+    # If an agent graph project is active, route through voice input node
+    if project_manager.current_project and runtime.agents:
+        responses = await runtime.send_voice_message(message, user)
+        
+        for resp in responses:
+            logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
+            
+            # Check this client's TTS preference
+            prefs = _client_preferences.get(sid, {})
+            if prefs.get("tts_enabled") and tts_instance is not None:
+                try:
+                    audio_bytes = tts_instance.synthesize(resp["response"])
+                    if audio_bytes:
+                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                        await sio.emit("tts_audio", {
+                            "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                        }, room=sid)
+                        logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
+                except Exception as e:
+                    logger.error(f"TTS synthesis failed: {e}")
 
 
 # ==================== Schedule ====================
 
-@socketio.on("get_schedule")
-def handle_get_schedule():
+@sio.event
+async def get_schedule(sid):
     """Get all scheduled tasks."""
     tasks = []
     for task_id, task in scheduler.tasks.items():
@@ -320,63 +377,64 @@ def handle_get_schedule():
             "last_run": task.last_run.isoformat() if task.last_run else None,
             "run_at": task.run_at.isoformat() if task.run_at else None
         })
-    emit("schedule_update", {"tasks": tasks})
+    await sio.emit("schedule_update", {"tasks": tasks}, room=sid)
 
 
-@socketio.on("pause_schedule_task")
-def handle_pause_task(data):
+@sio.event
+async def pause_schedule_task(sid, data):
     """Pause a scheduled task."""
     task_id = data.get("taskId")
     if task_id:
         scheduler.pause_task(task_id)
-        handle_get_schedule()
+        await get_schedule(sid)
 
 
-@socketio.on("resume_schedule_task")
-def handle_resume_task(data):
+@sio.event
+async def resume_schedule_task(sid, data):
     """Resume a paused task."""
     task_id = data.get("taskId")
     if task_id:
         scheduler.resume_task(task_id)
-        handle_get_schedule()
+        await get_schedule(sid)
 
 
-@socketio.on("cancel_schedule_task")
-def handle_cancel_task(data):
+@sio.event
+async def cancel_schedule_task(sid, data):
     """Cancel a scheduled task."""
     task_id = data.get("taskId")
     if task_id:
         scheduler.cancel_task(task_id)
-        handle_get_schedule()
+        await get_schedule(sid)
+
 
 # ==================== Project Management ====================
 
-@socketio.on("list_projects")
-def handle_list_projects():
+@sio.event
+async def list_projects(sid):
     """List all saved projects."""
-    projects = project_manager.list_projects()
-    emit("projects_list", {"projects": projects})
+    projects = await project_manager.list_projects()
+    await sio.emit("projects_list", {"projects": projects}, room=sid)
 
 
-@socketio.on("create_project")
-def handle_create_project(data):
+@sio.event
+async def create_project(sid, data):
     """Create a new project."""
     name = data.get("name", "Untitled Project")
     try:
-        project = project_manager.create_project(name)
-        emit("project_created", {
+        project = await project_manager.create_project(name)
+        await sio.emit("project_created", {
             "id": project.id,
             "name": project.name,
-        })
-        handle_list_projects()
-        socketio.emit("log", {"type": "success", "message": f"Project '{name}' created"})
+        }, room=sid)
+        await list_projects(sid)
+        await sio.emit("log", {"type": "success", "message": f"Project '{name}' created"})
     except Exception as e:
         logger.error(f"Failed to create project: {e}")
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
-@socketio.on("load_project")
-def handle_load_project(data):
+@sio.event
+async def load_project(sid, data):
     """Load a project and instantiate its agent graph."""
     global tts_enabled, tts_instance
     
@@ -385,7 +443,7 @@ def handle_load_project(data):
         return
     
     try:
-        project = project_manager.load_project(project_id)
+        project = await project_manager.load_project(project_id)
         
         # Restore TTS settings from project
         tts_settings = project.tts_settings
@@ -398,7 +456,7 @@ def handle_load_project(data):
             tts_instance.set_speed(tts_settings.speed)
             tts_instance.set_speaker(tts_settings.speaker)
         
-        emit("project_loaded", {
+        await sio.emit("project_loaded", {
             "id": project.id,
             "name": project.name,
             "tts_settings": {
@@ -407,20 +465,19 @@ def handle_load_project(data):
                 "speed": tts_settings.speed,
                 "speaker": tts_settings.speaker,
             }
-        })
-        emit("agent_graph_state", get_agent_graph_state())
-        # Also emit current TTS settings so UI updates
-        handle_get_tts_settings()
-        socketio.emit("log", {"type": "success", "message": f"Project '{project.name}' loaded"})
+        }, room=sid)
+        await sio.emit("agent_graph_state", _build_agent_graph_state(), room=sid)
+        await get_tts_settings(sid)
+        await sio.emit("log", {"type": "success", "message": f"Project '{project.name}' loaded"})
     except FileNotFoundError:
-        emit("error", {"message": f"Project {project_id} not found"})
+        await sio.emit("error", {"message": f"Project {project_id} not found"}, room=sid)
     except Exception as e:
         logger.error(f"Failed to load project: {e}")
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
-@socketio.on("save_project")
-def handle_save_project():
+@sio.event
+async def save_project(sid):
     """Save the current project with current TTS settings."""
     global tts_enabled, tts_instance
     
@@ -434,80 +491,77 @@ def handle_save_project():
                 speaker=tts_instance.speaker if tts_instance else 0,
             )
         
-        project_manager.save_project()
-        socketio.emit("log", {"type": "success", "message": "Project saved"})
+        await project_manager.save_project()
+        await sio.emit("log", {"type": "success", "message": "Project saved"})
     except ValueError as e:
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
-@socketio.on("deploy_project")
-def handle_deploy_project():
+@sio.event
+async def deploy_project(sid):
     """Deploy the current project - instantiate all agents and resources."""
     try:
         if not project_manager.current_project:
-            emit("error", {"message": "No project loaded"})
+            await sio.emit("error", {"message": "No project loaded"}, room=sid)
             return
         
-        runtime.deploy(
+        await runtime.deploy(
             project_manager.current_project.agent_graph,
             project_manager.current_project.id
         )
-        socketio.emit("agent_graph_state", get_agent_graph_state())
-        # Emit agent graph agents list so Agents tab can display them
-        socketio.emit("agent_graph_agents", runtime.get_running_agents())
-        socketio.emit("log", {"type": "success", "message": f"Project deployed: {project_manager.current_project.name}"})
+        await sio.emit("agent_graph_state", _build_agent_graph_state())
+        await sio.emit("agent_graph_agents", runtime.get_running_agents())
+        await sio.emit("log", {"type": "success", "message": f"Project deployed: {project_manager.current_project.name}"})
     except Exception as e:
         import traceback
         logger.error(f"Failed to deploy project: {e}\n{traceback.format_exc()}")
-        emit("error", {"message": str(e) or "Unknown error during deployment"})
+        await sio.emit("error", {"message": str(e) or "Unknown error during deployment"}, room=sid)
 
 
-@socketio.on("undeploy_project")
-def handle_undeploy_project():
+@sio.event
+async def undeploy_project(sid):
     """Undeploy the current project - stop all agents and resources."""
     try:
-        runtime.undeploy()
-        socketio.emit("agent_graph_state", get_agent_graph_state())
-        # Clear agent graph agents
-        socketio.emit("agent_graph_agents", [])
-        socketio.emit("log", {"type": "success", "message": "Project undeployed"})
+        await runtime.undeploy()
+        await sio.emit("agent_graph_state", _build_agent_graph_state())
+        await sio.emit("agent_graph_agents", [])
+        await sio.emit("log", {"type": "success", "message": "Project undeployed"})
     except Exception as e:
         logger.error(f"Failed to undeploy project: {e}")
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
-@socketio.on("stop_project")
-def handle_stop_project():
+@sio.event
+async def stop_project(sid):
     """Stop all nodes and unload the current project."""
-    project_manager.close_project()
-    emit("project_stopped", {})
-    socketio.emit("log", {"type": "info", "message": "Project stopped"})
+    await project_manager.close_project()
+    await sio.emit("project_stopped", {}, room=sid)
+    await sio.emit("log", {"type": "info", "message": "Project stopped"})
 
 
-@socketio.on("delete_project")
-def handle_delete_project(data):
+@sio.event
+async def delete_project(sid, data):
     """Delete a project."""
     project_id = data.get("id")
     if not project_id:
         return
     
-    project_manager.delete_project(project_id)
-    handle_list_projects()
-    socketio.emit("log", {"type": "warning", "message": f"Project '{project_id}' deleted"})
+    await project_manager.delete_project(project_id)
+    await list_projects(sid)
+    await sio.emit("log", {"type": "warning", "message": f"Project '{project_id}' deleted"})
 
 
 # ==================== Agent Graph Operations ====================
 
-@socketio.on("get_agent_graph_state")
-def handle_get_agent_graph_state():
+@sio.event
+async def get_agent_graph_state(sid):
     """Get the current agent graph state."""
-    emit("agent_graph_state", get_agent_graph_state())
-    # Also emit agent graph agents so Agents tab displays them
-    emit("agent_graph_agents", runtime.get_running_agents())
+    await sio.emit("agent_graph_state", _build_agent_graph_state(), room=sid)
+    await sio.emit("agent_graph_agents", runtime.get_running_agents() if runtime else [], room=sid)
 
 
-@socketio.on("get_node_kg_data")
-def handle_get_node_kg_data(data):
+@sio.event
+async def get_node_kg_data(sid, data):
     """Get knowledge graph data for a specific node."""
     node_id = data.get("node_id")
     if not node_id or not runtime._current_project_id:
@@ -516,23 +570,21 @@ def handle_get_node_kg_data(data):
     kg = runtime.knowledge_graphs.get(node_id)
     if kg:
         kg_dict = kg.to_dict()
-        # Transform to frontend format
         entities = [
             {"name": name, "type": props.get("type", "Entity"), "properties": {k: v for k, v in props.items() if k != "type"}}
             for name, props in kg_dict.get("entities", {}).items()
         ]
         relationships = [
-            {"from": r["entity1"], "to": r["entity2"], "type": r.get("type", ""), "properties": {k: v for k, v in r.items() if k not in ("entity1", "entity2", "type")}}
+            {"from": r["entity1"], "to": r["entity2"], "type": r.get("relationship", ""), "properties": {k: v for k, v in r.items() if k not in ("entity1", "entity2", "relationship")}}
             for r in kg_dict.get("relationships", [])
         ]
-        emit("node_kg_data", {"node_id": node_id, "entities": entities, "relationships": relationships})
+        await sio.emit("node_kg_data", {"node_id": node_id, "entities": entities, "relationships": relationships}, room=sid)
     else:
-        # Return empty data if KG doesn't exist yet (not deployed)
-        emit("node_kg_data", {"node_id": node_id, "entities": [], "relationships": []})
+        await sio.emit("node_kg_data", {"node_id": node_id, "entities": [], "relationships": []}, room=sid)
 
 
-@socketio.on("add_node")
-def handle_add_node(data):
+@sio.event
+async def add_node(sid, data):
     """Add a node to the agent graph."""
     try:
         node_type = NodeType(data.get("type"))
@@ -551,16 +603,18 @@ def handle_add_node(data):
             config = MemoryStreamNodeConfig(**config_data)
         elif node_type == NodeType.TOOLBOX:
             config = ToolboxNodeConfig(**config_data)
-        elif node_type == NodeType.USER_INPUT:
-            config = UserInputNodeConfig(**config_data)
-        elif node_type == NodeType.USER_OUTPUT:
-            config = UserOutputNodeConfig(**config_data)
+        elif node_type == NodeType.TEXT_INPUT:
+            config = TextInputNodeConfig(**config_data)
+        elif node_type == NodeType.VOICE_INPUT:
+            config = VoiceInputNodeConfig(**config_data)
+        elif node_type == NodeType.TEXT_OUTPUT:
+            config = TextOutputNodeConfig(**config_data)
         elif node_type == NodeType.SCHEDULED_EVENT:
             config = ScheduledEventNodeConfig(**config_data)
         elif node_type == NodeType.WAIT_AND_COMBINE:
             config = WaitAndCombineNodeConfig(**config_data)
         else:
-            emit("error", {"message": f"Unknown node type: {node_type}"})
+            await sio.emit("error", {"message": f"Unknown node type: {node_type}"}, room=sid)
             return
         
         node = Node(
@@ -570,47 +624,47 @@ def handle_add_node(data):
         )
         
         if not project_manager.current_project:
-            emit("error", {"message": "No project loaded"})
+            await sio.emit("error", {"message": "No project loaded"}, room=sid)
             return
         
         if runtime.is_deployed:
-            emit("error", {"message": "Cannot add nodes while deployed. Undeploy first."})
+            await sio.emit("error", {"message": "Cannot add nodes while deployed. Undeploy first."}, room=sid)
             return
         
         project_manager.current_project.agent_graph.add_node(node)
-        project_manager.save_project()
-        emit("agent_graph_state", get_agent_graph_state())
-        socketio.emit("log", {"type": "success", "message": f"Node '{config_data.get('name', node_type.value)}' added"})
+        await project_manager.save_project()
+        await sio.emit("agent_graph_state", _build_agent_graph_state(), room=sid)
+        await sio.emit("log", {"type": "success", "message": f"Node '{config_data.get('name', node_type.value)}' added"})
         
     except ValueError as e:
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
     except Exception as e:
         logger.error(f"Failed to add node: {e}")
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
-@socketio.on("remove_node")
-def handle_remove_node(data):
+@sio.event
+async def remove_node(sid, data):
     """Remove a node from the agent graph."""
     node_id = data.get("id")
     if not node_id:
         return
     
     if not project_manager.current_project:
-        emit("error", {"message": "No project loaded"})
+        await sio.emit("error", {"message": "No project loaded"}, room=sid)
         return
     
     if runtime.is_deployed:
-        emit("error", {"message": "Cannot remove nodes while deployed. Undeploy first."})
+        await sio.emit("error", {"message": "Cannot remove nodes while deployed. Undeploy first."}, room=sid)
         return
     
     project_manager.current_project.agent_graph.remove_node(node_id)
-    project_manager.save_project()
-    emit("agent_graph_state", get_agent_graph_state())
+    await project_manager.save_project()
+    await sio.emit("agent_graph_state", _build_agent_graph_state(), room=sid)
 
 
-@socketio.on("update_node_position")
-def handle_update_node_position(data):
+@sio.event
+async def update_node_position(sid, data):
     """Update a node's position."""
     node_id = data.get("id")
     x = data.get("x", 0)
@@ -624,8 +678,8 @@ def handle_update_node_position(data):
             # Don't save on every position update - let frontend batch these
 
 
-@socketio.on("update_node_config")
-def handle_update_node_config(data):
+@sio.event
+async def update_node_config(sid, data):
     """Update a node's configuration."""
     node_id = data.get("id")
     config_updates = data.get("config", {})
@@ -637,16 +691,16 @@ def handle_update_node_config(data):
                 if hasattr(node.config, key):
                     setattr(node.config, key, value)
             logger.info(f"Updated config for node {node_id}: {config_updates}")
-        project_manager.save_project()
-        emit("agent_graph_state", get_agent_graph_state())
+        await project_manager.save_project()
+        await sio.emit("agent_graph_state", _build_agent_graph_state(), room=sid)
 
 
-@socketio.on("add_edge")
-def handle_add_edge(data):
+@sio.event
+async def add_edge(sid, data):
     """Add an edge between nodes."""
     try:
         if not project_manager.current_project:
-            emit("error", {"message": "No project loaded"})
+            await sio.emit("error", {"message": "No project loaded"}, room=sid)
             return
         
         edge = Edge(
@@ -658,77 +712,69 @@ def handle_add_edge(data):
         )
         
         project_manager.current_project.agent_graph.add_edge(edge)
-        project_manager.save_project()
-        emit("agent_graph_state", get_agent_graph_state())
+        await project_manager.save_project()
+        await sio.emit("agent_graph_state", _build_agent_graph_state(), room=sid)
         
     except Exception as e:
         logger.error(f"Failed to add edge: {e}")
-        emit("error", {"message": str(e)})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
-@socketio.on("remove_edge")
-def handle_remove_edge(data):
+@sio.event
+async def remove_edge(sid, data):
     """Remove an edge from the agent graph."""
     edge_id = data.get("id")
     if not edge_id:
         return
     
     if not project_manager.current_project:
-        emit("error", {"message": "No project loaded"})
+        await sio.emit("error", {"message": "No project loaded"}, room=sid)
         return
     
     project_manager.current_project.agent_graph.remove_edge(edge_id)
-    project_manager.save_project()
-    emit("agent_graph_state", get_agent_graph_state())
+    await project_manager.save_project()
+    await sio.emit("agent_graph_state", _build_agent_graph_state(), room=sid)
 
 
-@socketio.on("agent_graph_send_user_message")
-def handle_agent_graph_user_message(data):
+@sio.event
+async def agent_graph_send_user_message(sid, data):
     """Send a user message through the agent graph."""
-    from flask import request
-    sid = request.sid
+    global tts_instance
     
     user = data.get("user", "User")
     content = data.get("message", "")
     
     # Echo the user's message
-    emit("chat_message", {
+    await sio.emit("chat_message", {
         "user": user,
         "message": content,
         "source": "agent_graph"
-    })
+    }, room=sid)
     
-    def process():
-        global tts_instance
-        
-        responses = runtime.send_user_message(content, user)
-        # Text is broadcast to all via on_agent_graph_message callback
-        # Here we only handle audio for the requesting client
-        
-        for resp in responses:
-            logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
-            
-            # Check this client's TTS preference (per-client only, no global check)
-            prefs = _client_preferences.get(sid, {})
-            if prefs.get("tts_enabled") and tts_instance is not None:
-                try:
-                    audio_bytes = tts_instance.synthesize(resp["response"])
-                    if audio_bytes:
-                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-                        socketio.emit("tts_audio", {
-                            "audioUrl": f"data:audio/wav;base64,{audio_b64}"
-                        }, room=sid)
-                        logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
-                except Exception as e:
-                    logger.error(f"TTS synthesis failed: {e}")
+    responses = await runtime.send_user_message(content, user)
     
-    socketio.start_background_task(process)
+    for resp in responses:
+        logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
+        
+        # Check this client's TTS preference
+        prefs = _client_preferences.get(sid, {})
+        if prefs.get("tts_enabled") and tts_instance is not None:
+            try:
+                audio_bytes = tts_instance.synthesize(resp["response"])
+                if audio_bytes:
+                    audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                    await sio.emit("tts_audio", {
+                        "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                    }, room=sid)
+                    logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
+            except Exception as e:
+                logger.error(f"TTS synthesis failed: {e}")
 
 
 # ==================== TTS ====================
 
-@socketio.on("get_tts_settings")
-def handle_get_tts_settings():
+@sio.event
+async def get_tts_settings(sid):
     """Get current TTS settings."""
     global tts_enabled, tts_instance
     
@@ -748,15 +794,13 @@ def handle_get_tts_settings():
             "speaker": instance_settings.get("speaker", 0),
         })
     
-    emit("tts_settings", settings)
+    await sio.emit("tts_settings", settings, room=sid)
 
 
-@socketio.on("set_tts_enabled")
-def handle_set_tts_enabled(data):
+@sio.event
+async def set_tts_enabled(sid, data):
     """Set per-client TTS preference."""
     global tts_instance
-    from flask import request
-    sid = request.sid
     enabled = data.get("enabled", False)
     
     if sid not in _client_preferences:
@@ -769,18 +813,16 @@ def handle_set_tts_enabled(data):
         logger.info("TTS instance initialized on first client enable")
     
     logger.info(f"Client {sid} TTS preference: {enabled}")
-    emit("tts_preference_updated", {"enabled": enabled})
+    await sio.emit("tts_preference_updated", {"enabled": enabled}, room=sid)
 
 
-@socketio.on("set_tts_settings")
-def handle_set_tts_settings(data):
+@sio.event
+async def set_tts_settings(sid, data):
     """Update TTS settings."""
     global tts_enabled, tts_instance
-    from flask import request
-    sid = request.sid
     
     if not PIPER_AVAILABLE:
-        emit("error", {"message": "Piper TTS is not available. Install with: pip install piper-tts"})
+        await sio.emit("error", {"message": "Piper TTS is not available. Install with: pip install piper-tts"}, room=sid)
         return
     
     # Update enabled state
@@ -803,7 +845,7 @@ def handle_set_tts_settings(data):
         if tts_instance.set_voice(voice):
             logger.info(f"TTS voice set to: {voice}")
         else:
-            emit("error", {"message": f"Failed to load voice: {voice}"})
+            await sio.emit("error", {"message": f"Failed to load voice: {voice}"}, room=sid)
     
     # Update speed
     if "speed" in data and tts_instance is not None:
@@ -816,16 +858,16 @@ def handle_set_tts_settings(data):
         logger.info(f"TTS speaker set to: {data['speaker']}")
     
     # Emit updated settings
-    handle_get_tts_settings()
+    await get_tts_settings(sid)
 
 
-@socketio.on("get_tts_voices")
-def handle_get_tts_voices():
+@sio.event
+async def get_tts_voices(sid):
     """Get list of available TTS voices."""
     global tts_instance
     
     if not PIPER_AVAILABLE:
-        emit("tts_voices", {"voices": [], "error": "Piper TTS not available"})
+        await sio.emit("tts_voices", {"voices": [], "error": "Piper TTS not available"}, room=sid)
         return
     
     # Initialize instance if needed
@@ -833,7 +875,7 @@ def handle_get_tts_voices():
         tts_instance = get_tts()
     
     voices = tts_instance.list_voices()
-    emit("tts_voices", {
+    await sio.emit("tts_voices", {
         "voices": [
             {
                 "key": v.key,
@@ -846,230 +888,65 @@ def handle_get_tts_voices():
             }
             for v in voices
         ]
-    })
+    }, room=sid)
 
 
-@socketio.on("download_tts_voice")
-def handle_download_tts_voice(data):
+@sio.event
+async def download_tts_voice(sid, data):
     """Download a TTS voice model."""
-    global tts_instance
+    global tts_instance, tts_enabled
     
     if not PIPER_AVAILABLE:
-        emit("error", {"message": "Piper TTS not available"})
+        await sio.emit("error", {"message": "Piper TTS not available"}, room=sid)
         return
     
     voice_key = data.get("voice")
     if not voice_key:
-        emit("error", {"message": "Voice key required"})
+        await sio.emit("error", {"message": "Voice key required"}, room=sid)
         return
     
     if tts_instance is None:
         tts_instance = get_tts()
     
-    def do_download():
-        global tts_enabled
-        try:
-            socketio.emit("tts_download_progress", {"voice": voice_key, "status": "downloading"})
-            success = tts_instance.download_voice(voice_key)
+    try:
+        await sio.emit("tts_download_progress", {"voice": voice_key, "status": "downloading"})
+        success = tts_instance.download_voice(voice_key)
+        
+        if success:
+            await sio.emit("tts_download_progress", {"voice": voice_key, "status": "complete"})
+            await sio.emit("log", {"type": "success", "message": f"Voice '{voice_key}' downloaded"})
             
-            if success:
-                socketio.emit("tts_download_progress", {"voice": voice_key, "status": "complete"})
-                socketio.emit("log", {"type": "success", "message": f"Voice '{voice_key}' downloaded"})
-                
-                # Auto-select the downloaded voice
-                if tts_instance.set_voice(voice_key):
-                    logger.info(f"Auto-selected voice: {voice_key}")
-                
-                # Refresh voice list
-                voices = tts_instance.list_voices()
-                socketio.emit("tts_voices", {
-                    "voices": [
-                        {
-                            "key": v.key,
-                            "name": v.name,
-                            "language": v.language,
-                            "quality": v.quality,
-                            "downloaded": v.downloaded,
-                            "num_speakers": v.num_speakers,
-                            "speaker_id_map": v.speaker_id_map,
-                        }
-                        for v in voices
-                    ]
-                })
-                
-                # Also emit updated TTS settings with the new voice
-                socketio.emit("tts_settings", {
-                    "enabled": tts_enabled,
-                    "available": PIPER_AVAILABLE,
-                    "voice": tts_instance.current_voice_name,
-                    "speed": tts_instance.speed,
-                    "speaker": tts_instance.speaker,
-                })
-            else:
-                socketio.emit("tts_download_progress", {"voice": voice_key, "status": "failed"})
-                socketio.emit("error", {"message": f"Failed to download voice '{voice_key}'"})
-        except Exception as e:
-            logger.error(f"Voice download failed: {e}")
-            socketio.emit("tts_download_progress", {"voice": voice_key, "status": "failed"})
-            socketio.emit("error", {"message": str(e)})
-    
-    socketio.start_background_task(do_download)
-
-
-# ==================== Voice / STT ====================
-
-# Lazy-loaded voice components
-_transcriber = None
-_audio_buffers = {}  # sid -> AudioBuffer
-
-def get_transcriber():
-    """Get or create the transcriber singleton."""
-    global _transcriber
-    if _transcriber is None:
-        from beezle_bug.voice import Transcriber
-        _transcriber = Transcriber(model_size="small", device="cpu")
-    return _transcriber
-
-
-@socketio.on("audio_start")
-def handle_audio_start(data=None):
-    """Start a new audio recording session."""
-    from beezle_bug.voice.vad import AudioBuffer
-    from flask import request
-    
-    sid = request.sid
-    _audio_buffers[sid] = AudioBuffer(max_duration_seconds=30.0, sample_rate=16000)
-    logger.debug(f"Audio recording started for session {sid}")
-    emit("audio_status", {"status": "recording"})
-
-
-@socketio.on("audio_chunk")
-def handle_audio_chunk(data):
-    """Receive audio chunk from browser."""
-    from flask import request
-    
-    sid = request.sid
-    if sid not in _audio_buffers:
-        logger.warning(f"Received audio chunk for unknown session {sid}")
-        return
-    
-    # data should be bytes or base64
-    if isinstance(data, dict) and "audio" in data:
-        import base64
-        audio_bytes = base64.b64decode(data["audio"])
-    elif isinstance(data, bytes):
-        audio_bytes = data
-    else:
-        logger.warning(f"Invalid audio chunk format: {type(data)}")
-        return
-    
-    _audio_buffers[sid].append(audio_bytes)
-
-
-@socketio.on("audio_end")
-def handle_audio_end(data=None):
-    """End audio recording and transcribe."""
-    from flask import request
-    
-    sid = request.sid
-    if sid not in _audio_buffers:
-        logger.warning(f"No audio buffer for session {sid}")
-        emit("transcription", {"error": "No audio recorded"})
-        return
-    
-    buffer = _audio_buffers.pop(sid)
-    audio_bytes = buffer.get_audio()
-    
-    if len(audio_bytes) < 1000:  # Too short
-        logger.debug("Audio too short, skipping transcription")
-        emit("transcription", {"text": "", "error": "Audio too short"})
-        return
-    
-    def do_transcribe():
-        try:
-            # Add WAV header if raw PCM
-            audio_with_header = _add_wav_header(audio_bytes, sample_rate=16000, channels=1)
+            # Auto-select the downloaded voice
+            if tts_instance.set_voice(voice_key):
+                logger.info(f"Auto-selected voice: {voice_key}")
             
-            transcriber = get_transcriber()
-            text = transcriber.transcribe(audio_with_header)
+            # Refresh voice list
+            await get_tts_voices(sid)
             
-            logger.info(f"Transcribed: {text[:50]}...")
-            socketio.emit("transcription", {"text": text}, to=sid)
-            
-            # Optionally auto-send to chat
-            auto_send = data.get("auto_send", False) if isinstance(data, dict) else False
-            if auto_send and text.strip():
-                # Emit as user message (to all - will be seen by all clients)
-                socketio.emit("chat_message", {
-                    "user": "User",
-                    "message": text,
-                    "source": "voice"
-                })
-                
-                # Process with agent graph or agents
-                # Text responses are broadcast via on_agent_graph_message callback
-                # Here we only handle audio for the requesting client
-                if project_manager.current_project and runtime.agents:
-                    responses = runtime.send_user_message(text, "User")
-                    for resp in responses:
-                        logger.debug(f"Voice response from {resp['agent_name']}: {resp['response'][:50]}...")
-                        
-                        # Check this client's TTS preference (per-client only)
-                        prefs = _client_preferences.get(sid, {})
-                        if prefs.get("tts_enabled") and tts_instance is not None:
-                            try:
-                                audio_bytes_tts = tts_instance.synthesize(resp["response"])
-                                if audio_bytes_tts:
-                                    audio_b64 = base64.b64encode(audio_bytes_tts).decode('utf-8')
-                                    socketio.emit("tts_audio", {
-                                        "audioUrl": f"data:audio/wav;base64,{audio_b64}"
-                                    }, room=sid)
-                                    logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes_tts)} bytes")
-                            except Exception as tts_e:
-                                logger.error(f"TTS synthesis failed: {tts_e}")
-                        
-        except Exception as e:
-            logger.error(f"Transcription error: {e}")
-            socketio.emit("transcription", {"error": str(e)}, to=sid)
-    
-    socketio.start_background_task(do_transcribe)
-
-
-def _add_wav_header(pcm_data: bytes, sample_rate: int = 16000, channels: int = 1, bits_per_sample: int = 16) -> bytes:
-    """Add WAV header to raw PCM data."""
-    import struct
-    
-    data_size = len(pcm_data)
-    byte_rate = sample_rate * channels * bits_per_sample // 8
-    block_align = channels * bits_per_sample // 8
-    
-    header = struct.pack(
-        '<4sI4s4sIHHIIHH4sI',
-        b'RIFF',
-        36 + data_size,
-        b'WAVE',
-        b'fmt ',
-        16,  # Subchunk1Size for PCM
-        1,   # AudioFormat (PCM)
-        channels,
-        sample_rate,
-        byte_rate,
-        block_align,
-        bits_per_sample,
-        b'data',
-        data_size
-    )
-    
-    return header + pcm_data
+            # Emit updated TTS settings with the new voice
+            await sio.emit("tts_settings", {
+                "enabled": tts_enabled,
+                "available": PIPER_AVAILABLE,
+                "voice": tts_instance.current_voice_name,
+                "speed": tts_instance.speed,
+                "speaker": tts_instance.speaker,
+            })
+        else:
+            await sio.emit("tts_download_progress", {"voice": voice_key, "status": "failed"})
+            await sio.emit("error", {"message": f"Failed to download voice '{voice_key}'"}, room=sid)
+    except Exception as e:
+        logger.error(f"Voice download failed: {e}")
+        await sio.emit("tts_download_progress", {"voice": voice_key, "status": "failed"})
+        await sio.emit("error", {"message": str(e)}, room=sid)
 
 
 # ==================== STT Settings ====================
 
-@socketio.on("get_stt_settings")
-def handle_get_stt_settings():
-    """Get current STT settings from project."""
+@sio.event
+async def get_stt_settings(sid):
+    """Get current STT settings from project (project-level config, NOT per-client enabled state)."""
+    # Note: "enabled" is per-client, not included here
     settings = {
-        "enabled": False,
         "device_id": None,
         "device_label": None,
         "wake_words": ["hey beezle", "ok beezle"],
@@ -1080,7 +957,6 @@ def handle_get_stt_settings():
     if project_manager.current_project:
         stt = project_manager.current_project.stt_settings
         settings = {
-            "enabled": stt.enabled,
             "device_id": stt.device_id,
             "device_label": stt.device_label,
             "wake_words": stt.wake_words,
@@ -1088,45 +964,43 @@ def handle_get_stt_settings():
             "max_duration": stt.max_duration,
         }
     
-    emit("stt_settings", settings)
+    await sio.emit("stt_settings", settings, room=sid)
 
 
-@socketio.on("set_stt_enabled")
-def handle_set_stt_enabled(data):
+@sio.event
+async def set_stt_enabled(sid, data):
     """Set per-client STT preference."""
-    from flask import request
-    sid = request.sid
     enabled = data.get("enabled", False)
     
     if sid not in _client_preferences:
         _client_preferences[sid] = {}
     _client_preferences[sid]["stt_enabled"] = enabled
     
+    # Emit back to client so Chat component can react
+    await sio.emit("stt_enabled_changed", {"enabled": enabled}, room=sid)
+    
     logger.info(f"Client {sid} STT preference: {enabled}")
 
 
-@socketio.on("set_skip_wake_word")
-def handle_set_skip_wake_word(data):
+@sio.event
+async def set_skip_wake_word(sid, data):
     """Echo skip wake word setting back to client for Chat component."""
-    from flask import request
     enabled = data.get("enabled", False)
-    # Echo back to same client so Chat.jsx can update its state
-    emit("skip_wake_word_changed", {"enabled": enabled})
-    logger.debug(f"Client {request.sid} skip_wake_word: {enabled}")
+    await sio.emit("skip_wake_word_changed", {"enabled": enabled}, room=sid)
+    logger.debug(f"Client {sid} skip_wake_word: {enabled}")
 
 
-@socketio.on("set_stt_settings")
-def handle_set_stt_settings(data):
-    """Update STT settings."""
+@sio.event
+async def set_stt_settings(sid, data):
+    """Update STT settings (project-level config, NOT per-client enabled state)."""
     if not project_manager.current_project:
-        emit("error", {"message": "No project loaded"})
+        await sio.emit("error", {"message": "No project loaded"}, room=sid)
         return
     
     stt = project_manager.current_project.stt_settings
     
-    if "enabled" in data:
-        stt.enabled = data["enabled"]
-        logger.info(f"STT {'enabled' if stt.enabled else 'disabled'}")
+    # Note: "enabled" is now per-client, handled by set_stt_enabled
+    # This handler only manages project-level config (device, wake words, etc.)
     
     if "device_id" in data:
         stt.device_id = data["device_id"]
@@ -1143,231 +1017,165 @@ def handle_set_stt_settings(data):
     if "max_duration" in data:
         stt.max_duration = float(data["max_duration"])
     
-    # Emit updated settings
-    handle_get_stt_settings()
-
-
-# ==================== Continuous STT / Wake Word ====================
-
-# Per-session STT state: sid -> {"state": "idle"|"active", "buffer": AudioBuffer}
-_stt_sessions = {}
-
-
-def _check_wake_word(text: str, wake_words: list) -> tuple[bool, str]:
-    """Check if text starts with any wake word. Returns (matched, remainder)."""
-    text_lower = text.lower().strip()
-    for wake in wake_words:
-        wake_lower = wake.lower().strip()
-        if text_lower.startswith(wake_lower):
-            remainder = text[len(wake):].strip()
-            return True, remainder
-    return False, text
-
-
-def _check_stop_word(text: str, stop_words: list) -> bool:
-    """Check if text contains any stop word."""
-    text_lower = text.lower().strip()
-    for stop in stop_words:
-        if stop.lower().strip() in text_lower:
-            return True
-    return False
-
-
-def _get_stt_max_duration() -> float:
-    """Get max recording duration from project settings, with fallback."""
-    if project_manager.current_project:
-        return project_manager.current_project.stt_settings.max_duration
-    return 30.0  # Default fallback
-
-
-@socketio.on("stt_stream_start")
-def handle_stt_stream_start(data=None):
-    """Start continuous listening session."""
-    from beezle_bug.voice.vad import AudioBuffer
-    from flask import request
-    
-    sid = request.sid
-    max_duration = _get_stt_max_duration()
-    
-    # Check if client wants to skip wake word detection (e.g., mobile)
-    skip_wake_word = data.get("skip_wake_word", False) if data else False
-    initial_state = "active" if skip_wake_word else "idle"
-    
-    _stt_sessions[sid] = {
-        "state": initial_state,
-        "buffer": AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000),
-        "speech_started": False,
+    # Broadcast updated settings to ALL connected clients
+    # Note: "enabled" is excluded - it's per-client
+    settings = {
+        "device_id": stt.device_id,
+        "device_label": stt.device_label,
+        "wake_words": stt.wake_words,
+        "stop_words": stt.stop_words,
+        "max_duration": stt.max_duration,
     }
-    logger.debug(f"STT stream started for session {sid} with max_duration={max_duration}s, state={initial_state}")
+    await sio.emit("stt_settings", settings)  # Broadcast to all
+    logger.info(f"STT settings updated")
+
+
+# ==================== STT Streaming ====================
+
+# Per-client audio buffers for streaming STT
+_stt_audio_buffers: dict[str, dict] = {}
+
+@sio.event
+async def stt_stream_start(sid, data):
+    """Start a new STT streaming session."""
+    skip_wake_word = data.get("skip_wake_word", False)
+    
+    # Initialize audio buffer for this client
+    _stt_audio_buffers[sid] = {
+        "chunks": [],
+        "skip_wake_word": skip_wake_word,
+        "active": skip_wake_word,  # If skipping wake word, start active immediately
+    }
     
     if skip_wake_word:
-        emit("stt_status", {"state": "active", "message": "Listening..."})
-        emit("stt_activated", {})
-    else:
-        emit("stt_status", {"state": "idle", "message": "Listening for wake word..."})
+        await sio.emit("stt_activated", room=sid)
+    
+    logger.info(f"STT stream started for {sid} (skip_wake_word={skip_wake_word})")
 
 
-@socketio.on("stt_stream_chunk")
-def handle_stt_stream_chunk(data):
-    """Receive audio chunk in continuous listening mode."""
-    from flask import request
-    from beezle_bug.voice.vad import AudioBuffer
+@sio.event
+async def stt_stream_chunk(sid, data):
+    """Receive an audio chunk for STT processing."""
+    import base64
     
-    sid = request.sid
-    
-    # Auto-create session if it doesn't exist (handles race condition with stt_stream_start)
-    if sid not in _stt_sessions:
-        max_duration = _get_stt_max_duration()
-        _stt_sessions[sid] = {
-            "state": "idle",
-            "buffer": AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000),
-            "speech_started": False,
+    # Auto-create session if it doesn't exist (handles race conditions)
+    if sid not in _stt_audio_buffers:
+        _stt_audio_buffers[sid] = {
+            "chunks": [],
+            "skip_wake_word": False,
+            "active": False,
         }
-        logger.debug(f"STT session auto-created for {sid}")
     
-    session = _stt_sessions[sid]
-    
-    # Decode audio
-    if isinstance(data, dict) and "audio" in data:
-        audio_bytes = base64.b64decode(data["audio"])
-    elif isinstance(data, bytes):
-        audio_bytes = data
-    else:
-        logger.warning(f"Invalid STT stream chunk format: {type(data)}")
-        return
-    
-    # Check for speech using VAD info from frontend
+    buffer = _stt_audio_buffers[sid]
+    audio_b64 = data.get("audio", "")
     speech_detected = data.get("speech", True)
     
-    if speech_detected:
-        session["buffer"].append(audio_bytes)
-        if not session["speech_started"]:
-            logger.debug("Speech started - buffering audio")
-        session["speech_started"] = True
-    elif session["speech_started"]:
-        # Speech ended - process the segment
-        buffer_size = len(session["buffer"].get_audio())
-        logger.info(f"Speech ended - processing {buffer_size} bytes of audio")
-        _process_speech_segment(sid, session)
-        # Reset buffer for next segment
-        from beezle_bug.voice.vad import AudioBuffer
-        max_duration = _get_stt_max_duration()
-        session["buffer"] = AudioBuffer(max_duration_seconds=max_duration, sample_rate=16000)
-        session["speech_started"] = False
-
-
-def _process_speech_segment(sid: str, session: dict):
-    """Process a completed speech segment - transcribe and check wake/stop words."""
-    audio_bytes = session["buffer"].get_audio()
+    if audio_b64:
+        try:
+            audio_bytes = base64.b64decode(audio_b64)
+            buffer["chunks"].append(audio_bytes)
+        except Exception as e:
+            logger.error(f"Failed to decode audio chunk: {e}")
     
-    if len(audio_bytes) < 1000:
+    # Update state based on speech detection
+    if speech_detected and not buffer["active"]:
+        buffer["active"] = True
+        await sio.emit("stt_activated", room=sid)
+    elif not speech_detected and buffer["active"]:
+        # Speech ended - transcribe what we have
+        if buffer["chunks"]:
+            await _transcribe_and_send(sid, buffer)
+
+
+@sio.event
+async def stt_stream_stop(sid):
+    """Stop STT streaming and transcribe any remaining audio."""
+    if sid in _stt_audio_buffers:
+        buffer = _stt_audio_buffers[sid]
+        
+        # Transcribe any remaining audio
+        if buffer["chunks"]:
+            await _transcribe_and_send(sid, buffer)
+        
+        del _stt_audio_buffers[sid]
+    
+    await sio.emit("stt_deactivated", room=sid)
+    logger.debug(f"STT stream stopped for {sid}")
+
+
+async def _transcribe_and_send(sid: str, buffer: dict):
+    """Transcribe accumulated audio and send the result."""
+    from beezle_bug.voice.transcriber import get_transcriber
+    import struct
+    
+    if not buffer["chunks"]:
         return
     
-    def do_process():
-        try:
-            audio_with_header = _add_wav_header(audio_bytes, sample_rate=16000, channels=1)
-            transcriber = get_transcriber()
-            text = transcriber.transcribe(audio_with_header)
-            
-            if not text.strip():
-                return
-            
-            logger.debug(f"STT transcribed: {text}")
-            
-            # Get settings
-            stt_settings = None
-            if project_manager.current_project:
-                stt_settings = project_manager.current_project.stt_settings
-            
-            wake_words = stt_settings.wake_words if stt_settings else ["hey beezle"]
-            stop_words = stt_settings.stop_words if stt_settings else ["stop listening"]
-            
-            current_state = session["state"]
-            
-            if current_state == "idle":
-                # Check for wake word
-                matched, remainder = _check_wake_word(text, wake_words)
-                if matched:
-                    session["state"] = "active"
-                    socketio.emit("stt_activated", {}, to=sid)
-                    socketio.emit("stt_status", {"state": "active", "message": "Listening..."}, to=sid)
-                    logger.info(f"Wake word detected, switching to active mode")
-                    
-                    # If there's content after wake word, process it
-                    if remainder:
-                        _send_stt_message(sid, remainder)
-                else:
-                    # Emit what was heard (for debugging/feedback)
-                    socketio.emit("stt_partial", {"text": text}, to=sid)
-            
-            elif current_state == "active":
-                # Check for stop word
-                if _check_stop_word(text, stop_words):
-                    session["state"] = "idle"
-                    socketio.emit("stt_deactivated", {}, to=sid)
-                    socketio.emit("stt_status", {"state": "idle", "message": "Listening for wake word..."}, to=sid)
-                    logger.info(f"Stop word detected, switching to idle mode")
-                else:
-                    # Send as user message
-                    _send_stt_message(sid, text)
-                    
-        except Exception as e:
-            logger.error(f"STT processing error: {e}")
-    
-    socketio.start_background_task(do_process)
+    try:
+        # Combine all chunks into one audio buffer
+        all_audio = b"".join(buffer["chunks"])
+        
+        # Create WAV header for the raw PCM data
+        # The frontend sends 16-bit mono PCM at 16000 Hz
+        sample_rate = 16000
+        num_channels = 1
+        bits_per_sample = 16
+        num_samples = len(all_audio) // 2
+        
+        wav_header = struct.pack(
+            '<4sI4s4sIHHIIHH4sI',
+            b'RIFF',
+            36 + len(all_audio),
+            b'WAVE',
+            b'fmt ',
+            16,  # PCM format chunk size
+            1,   # Audio format (PCM)
+            num_channels,
+            sample_rate,
+            sample_rate * num_channels * bits_per_sample // 8,  # Byte rate
+            num_channels * bits_per_sample // 8,  # Block align
+            bits_per_sample,
+            b'data',
+            len(all_audio)
+        )
+        
+        wav_data = wav_header + all_audio
+        
+        # Get transcriber and transcribe
+        transcriber = get_transcriber()
+        text = transcriber.transcribe(wav_data)
+        
+        if text and text.strip():
+            logger.info(f"Transcribed for {sid}: '{text}' - emitting stt_final_text")
+            await sio.emit("stt_final_text", {"text": text}, room=sid)
+            logger.debug(f"stt_final_text emitted to {sid}")
+        
+        # Clear the buffer
+        buffer["chunks"] = []
+        buffer["active"] = False
+        
+    except Exception as e:
+        logger.error(f"Transcription failed for {sid}: {e}")
+        buffer["chunks"] = []
+        buffer["active"] = False
 
 
-def _send_stt_message(sid: str, text: str):
-    """Send transcribed text as a user message."""
-    global tts_instance
-    
-    socketio.emit("stt_message", {"text": text}, to=sid)
-    
-    # Emit as chat message to all clients
-    socketio.emit("chat_message", {
-        "user": "User",
-        "message": text,
-        "source": "voice"
-    })
-    
-    # Process with agent graph
-    # Text responses are broadcast via on_agent_graph_message callback
-    # Here we only handle audio for the requesting client
-    if project_manager.current_project and runtime.agents:
-        responses = runtime.send_user_message(text, "User")
-        for resp in responses:
-            logger.debug(f"Voice response from {resp['agent_name']}: {resp['response'][:50]}...")
-            
-            # Check this client's TTS preference (per-client only)
-            prefs = _client_preferences.get(sid, {})
-            if prefs.get("tts_enabled") and tts_instance is not None:
-                try:
-                    audio_bytes = tts_instance.synthesize(resp["response"])
-                    if audio_bytes:
-                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-                        socketio.emit("tts_audio", {
-                            "audioUrl": f"data:audio/wav;base64,{audio_b64}"
-                        }, room=sid)
-                        logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
-                except Exception as e:
-                    logger.error(f"TTS synthesis failed: {e}")
+# ==================== General Settings ====================
 
-
-@socketio.on("stt_stream_stop")
-def handle_stt_stream_stop(data=None):
-    """Stop continuous listening session."""
-    from flask import request
-    
-    sid = request.sid
-    if sid in _stt_sessions:
-        del _stt_sessions[sid]
-        logger.debug(f"STT stream stopped for session {sid}")
-    emit("stt_status", {"state": "stopped", "message": "Listening stopped"})
+@sio.event
+async def get_general_settings(sid):
+    """Get current general settings."""
+    settings = {
+        "storage_backend": DB_BACKEND,
+    }
+    await sio.emit("general_settings", settings, room=sid)
 
 
 # ==================== Main ====================
 
 if __name__ == "__main__":
+    import uvicorn
+    
     print("=" * 50)
     print("Beezle Bug WebChat Server")
     print("=" * 50)
@@ -1375,4 +1183,5 @@ if __name__ == "__main__":
     print("Open http://localhost:5000 in your browser")
     print("Or use the React UI at http://localhost:5173")
     print("=" * 50)
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+    
+    uvicorn.run(socket_app, host="0.0.0.0", port=5000)

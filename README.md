@@ -2,6 +2,8 @@
 
 # Beezle Bug
 
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?logo=discord&logoColor=white)](https://discord.gg/85PpjsRFpM)
+
 > *A visual agent graph builder inspired by the AI companion from Tad Williams' [Otherland](https://en.wikipedia.org/wiki/Otherland) series*
 
 **Beezle Bug** is a local-first, visual tool for building and orchestrating AI agent systems. Design multi-agent workflows with a node-based editor, connect agents to knowledge graphs and memory streams, and deploy them instantly—all from a modern dark-themed interface.
@@ -20,6 +22,7 @@
 - **Mobile Web UI** – Dedicated mobile-optimized chat interface at `/mobile` with per-client voice controls
 - **Media Embedding** – Images, videos, and YouTube/Vimeo links automatically embedded in chat
 - **Real-time Introspection** – Watch agent reasoning in real-time
+- **SQLite Storage** – Persistent project, knowledge graph, and memory data with SQLModel ORM
 - **Fully Local or Cloud** – Run entirely on your machine with local LLMs, or connect to remote APIs via LiteLLM
 
 ---
@@ -99,8 +102,9 @@ Visual editor for building agent pipelines:
 | 🧠 **Knowledge Graph** | Persistent entity-relationship storage |
 | 💾 **Memory Stream** | Observation-based memory buffer |
 | 🔧 **Toolbox** | Collection of tools an agent can use |
-| 💬 **User Chat** | Input from the user interface |
-| 🖥️ **User Display** | Output to the chat interface |
+| 💬 **Text Input** | Text messages from the chat interface |
+| 🎤 **Voice Input** | Transcribed speech from voice input |
+| 🖥️ **Text Output** | Output to the chat interface |
 | ⏰ **Scheduled Event** | Timer trigger for autonomous operation |
 | 🔀 **Wait & Combine** | Rendezvous point that waits for all inputs before forwarding |
 
@@ -226,11 +230,11 @@ docker compose up -d
 1. **Create a Project** – Click the folder icon → "New Project"
 2. **Add Nodes** – Click "+" in the Node Graph tab
    - Add an **Agent** node
-   - Add a **User Chat** node
-   - Add a **User Display** node
+   - Add a **Text Input** node
+   - Add a **Text Output** node
 3. **Connect Nodes** – Drag from output ports to input ports
-   - User Chat → Agent (message)
-   - Agent → User Display (message)
+   - Text Input → Agent (message)
+   - Agent → Text Output (message)
 4. **Configure Agent** – Select the agent node and configure:
    - API URL: Your LLM endpoint (e.g., `http://127.0.0.1:1234/v1`)
    - Model: Your model name
@@ -251,7 +255,7 @@ docker compose up -d
 ┌────────────────────────────┴────────────────────────────────┐
 │                      Backend (Flask)                         │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ ProjectMgr   │  │   Runtime    │  │   Storage    │       │
+│  │ ProjectMgr   │  │   Runtime    │  │  SQLite DB   │       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
 │         │                 │                  │               │
 │  ┌──────┴─────────────────┴──────────────────┴─────┐        │

@@ -3,7 +3,7 @@ import { socket } from '../lib/socket';
 import { 
   Plus, Trash2, Bot, Database, 
   MessageCircle, Monitor, Brain, Maximize2, ZoomIn, ZoomOut,
-  Wrench, Clock, GitMerge
+  Wrench, Clock, GitMerge, Mic
 } from 'lucide-react';
 
 // Node type definitions for the agent graph
@@ -12,51 +12,76 @@ const NODE_TYPES = {
     label: 'Agent', 
     color: '#3b82f6', 
     icon: Bot,
+    category: 'Agents',
     defaultConfig: { name: 'New Agent', model: 'gpt-4', api_url: 'http://127.0.0.1:1234/v1', api_key: '', system_template: 'agent' }
   },
   knowledge_graph: { 
     label: 'Knowledge Graph', 
     color: '#a855f7', 
     icon: Brain,
+    category: 'Memory',
     defaultConfig: { name: 'Knowledge Graph' }
   },
   memory_stream: { 
     label: 'Memory Stream', 
     color: '#22c55e', 
     icon: Database,
+    category: 'Memory',
     defaultConfig: { name: 'Memory Stream', max_observations: 1000 }
   },
   toolbox: { 
     label: 'Toolbox', 
     color: '#f97316', 
     icon: Wrench,
+    category: 'Resources',
     defaultConfig: { name: 'Toolbox', tools: [] }
   },
-  user_input: { 
-    label: 'User Chat', 
+  text_input: { 
+    label: 'Text Input', 
     color: '#eab308', 
     icon: MessageCircle,
-    defaultConfig: { name: 'User Chat' }
+    category: 'Inputs',
+    defaultConfig: { name: 'Text Input' }
   },
-  user_output: { 
-    label: 'User Display', 
+  voice_input: { 
+    label: 'Voice Input', 
+    color: '#8b5cf6', 
+    icon: Mic,
+    category: 'Inputs',
+    defaultConfig: { name: 'Voice Input' }
+  },
+  text_output: { 
+    label: 'Text Output', 
     color: '#ef4444', 
     icon: Monitor,
-    defaultConfig: { name: 'User Display' }
+    category: 'Outputs',
+    defaultConfig: { name: 'Text Output' }
   },
   scheduled_event: { 
     label: 'Scheduled Event', 
     color: '#06b6d4', 
     icon: Clock,
+    category: 'Flow Control',
     defaultConfig: { name: 'Scheduled Event', trigger_type: 'interval', interval_seconds: 30 }
   },
   wait_and_combine: { 
     label: 'Wait & Combine', 
     color: '#ec4899', 
     icon: GitMerge,
+    category: 'Flow Control',
     defaultConfig: { name: 'Wait and Combine' }
   },
 };
+
+// Categories for grouping nodes in the palette
+const NODE_CATEGORIES = [
+  'Agents',
+  'Inputs',
+  'Outputs',
+  'Memory',
+  'Resources',
+  'Flow Control',
+];
 
 // Edge type definitions
 const EDGE_TYPES = {
@@ -449,21 +474,33 @@ export default function NodeGraph({ onSelectNode, selectedNodeId }) {
                   Add Node
                 </button>
                 
-                {/* Node palette dropdown */}
+                {/* Node palette dropdown grouped by category */}
                 {showPalette && !isDeployed && (
-                  <div className="absolute top-full left-0 mt-1 bg-[#1a1a1a] border border-[#2b2b2b] rounded-lg shadow-xl z-50 min-w-[180px]">
-                    {Object.entries(NODE_TYPES).map(([type, def]) => {
-                      const Icon = def.icon;
+                  <div className="absolute top-full left-0 mt-1 bg-[#1a1a1a] border border-[#2b2b2b] rounded-lg shadow-xl z-50 min-w-[200px] max-h-[400px] overflow-y-auto">
+                    {NODE_CATEGORIES.map((category, catIndex) => {
+                      const nodesInCategory = Object.entries(NODE_TYPES).filter(([, def]) => def.category === category);
+                      if (nodesInCategory.length === 0) return null;
                       return (
-                        <button
-                          key={type}
-                          onClick={() => addNode(type)}
-                          className="w-full flex items-center gap-3 px-3 py-2 text-xs hover:bg-[#2b2b2b] transition-colors first:rounded-t-lg last:rounded-b-lg"
-                          style={{ color: def.color }}
-                        >
-                          <Icon size={14} />
-                          {def.label}
-                        </button>
+                        <div key={category}>
+                          {catIndex > 0 && <div className="border-t border-[#2b2b2b]" />}
+                          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#666] font-medium">
+                            {category}
+                          </div>
+                          {nodesInCategory.map(([type, def]) => {
+                            const Icon = def.icon;
+                            return (
+                              <button
+                                key={type}
+                                onClick={() => addNode(type)}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-[#2b2b2b] transition-colors"
+                                style={{ color: def.color }}
+                              >
+                                <Icon size={14} />
+                                {def.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       );
                     })}
                   </div>

@@ -12,7 +12,7 @@ class SearchWikipedia(Tool):
     query: str = Field(..., description="the search query")
     results: int = Field(..., description="the maxmimum number of results returned")
 
-    def run(self, agent):
+    async def run(self, agent):
         return wikipedia.search(self.query, results=self.results)
 
 
@@ -23,5 +23,5 @@ class GetWikipediaPageSummary(Tool):
 
     query: str = Field(..., description="the search query")
 
-    def run(self, agent):
+    async def run(self, agent):
         return wikipedia.summary(self.query, auto_suggest=False)

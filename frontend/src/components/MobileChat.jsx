@@ -335,6 +335,11 @@ export default function MobileChat() {
     
     function onSttActivated() {
       setVoiceState('active');
+      // Stop TTS audio immediately when VAD detects user is speaking
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
     }
     
     function onSttDeactivated() {
@@ -354,6 +359,13 @@ export default function MobileChat() {
         audio.play().catch(err => console.error('Failed to play TTS audio:', err));
       }
     }
+    
+    // Handle final transcribed text from server - route through VoiceInput node
+    function onSttFinalText(data) {
+      if (data.text && data.text.trim()) {
+        socket.emit('send_voice_message', { user: 'User', message: data.text });
+      }
+    }
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -365,6 +377,7 @@ export default function MobileChat() {
     socket.on('stt_activated', onSttActivated);
     socket.on('stt_deactivated', onSttDeactivated);
     socket.on('tts_audio', onTtsAudio);
+    socket.on('stt_final_text', onSttFinalText);
     
     socket.connect();
     socket.emit('get_agent_graph_state');
@@ -382,6 +395,7 @@ export default function MobileChat() {
       socket.off('stt_activated', onSttActivated);
       socket.off('stt_deactivated', onSttDeactivated);
       socket.off('tts_audio', onTtsAudio);
+      socket.off('stt_final_text', onSttFinalText);
     };
   }, []);
 

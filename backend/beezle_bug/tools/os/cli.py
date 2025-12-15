@@ -12,5 +12,5 @@ class ExecCommand(Tool):
 
     command: str = Field(..., description="The command to be executed")
 
-    def run(self, agent):
-        return subprocess.run(self.command, capture_output=True, text=True)
+    async def run(self, agent):
+        return subprocess.run(self.command, capture_output=True, text=True, shell=True)

@@ -57,7 +57,7 @@ class ExecPythonCode(Tool):
 
     code: str = Field(description="Python code to execute")
 
-    def run(self, agent) -> str:
+    async def run(self, agent) -> str:
         """
         Execute the code in the agent's IPython shell.
         

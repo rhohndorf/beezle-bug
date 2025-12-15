@@ -1,69 +1,144 @@
+"""
+Memory stream module for storing conversational observations.
+
+Observations are persisted to the database immediately and retrieval
+uses vector similarity search.
+"""
+
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import TYPE_CHECKING, List, Dict, Any, Optional
 from fastembed import TextEmbedding
 
 from beezle_bug.memory.memories import Observation
-from beezle_bug.llm_adapter import Message, ToolCallResult
+from beezle_bug.llm_adapter import Message, ToolCallResult, Response
+
+if TYPE_CHECKING:
+    from beezle_bug.storage.base import StorageBackend
+
 
 class MemoryStream:
+    """
+    A memory stream for storing and retrieving conversational observations.
+    
+    Observations are stored with embeddings for semantic similarity search.
+    All observations are persisted to the database immediately.
+    
+    Attributes:
+        IMPORTANCE_THRESHOLD: Threshold for importance scoring
+    """
+    
     IMPORTANCE_THRESHOLD = 10
 
-    def __init__(self) -> None:
-        self.memories: List[Observation] = []
-        self.last_reflection_point = 0
-        # Use persistent cache directory
-        self.embedding_model = TextEmbedding(cache_dir="/cache/fastembed")
-
-    def add(self, content: Message|ToolCallResult) -> None:
-        embedding = list(self.embedding_model.query_embed(content.json()))[0]
-        observation = Observation(content=content, embedding=embedding)
-        self.memories.append(observation)
-
-    def retrieve(self, text: str, k: int, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None) -> List[Observation]:
-        current_time = datetime.now()
-        text_embedding = list(self.embedding_model.query_embed(text))[0]
-        
-        # Filter by date range if specified
-        filtered_memories = self.memories
-        if from_date:
-            filtered_memories = [m for m in filtered_memories if m.created >= from_date]
-        if to_date:
-            filtered_memories = [m for m in filtered_memories if m.created <= to_date]
-        
-        retrieved_memories = sorted(filtered_memories, key=lambda x: x.score(text_embedding), reverse=True)[0:k]
-        for mem in retrieved_memories:
-            mem.accessed = current_time
-        retrieved_memories.sort(key=lambda x: x.created)
-        return retrieved_memories
-
-    def to_dict(self) -> Dict[str, Any]:
+    def __init__(
+        self,
+        storage: "StorageBackend",
+        ms_id: int
+    ) -> None:
         """
-        Serialize the memory stream to a dictionary.
-        
-        Returns:
-            Dictionary representation of the memory stream
-        """
-        return {
-            "last_reflection_point": self.last_reflection_point,
-            "memories": [mem.to_dict() for mem in self.memories]
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MemoryStream':
-        """
-        Create a memory stream from a dictionary.
+        Initialize a memory stream.
         
         Args:
-            data: Dictionary representation of the memory stream
+            storage: Storage backend for persistence (required)
+            ms_id: Database ID of this memory stream (required)
+        """
+        self._storage = storage
+        self._ms_id = ms_id
+        self.last_reflection_point = 0
+        # Use persistent cache directory for embedding model
+        self.embedding_model = TextEmbedding(cache_dir="/cache/fastembed")
+
+    async def add(self, content: Message | ToolCallResult | Response) -> None:
+        """
+        Add a new observation to the memory stream.
+        
+        Creates an embedding for the content and persists to the database.
+        
+        Args:
+            content: The message, tool call result, or response to store
+        """
+        # Generate embedding
+        content_json = content.model_dump_json() if hasattr(content, 'model_dump_json') else content.json()
+        embedding = list(self.embedding_model.query_embed(content_json))[0]
+        
+        observation = Observation(content=content, embedding=embedding)
+        
+        # Persist to database
+        await self._storage.ms_add_observation(self._ms_id, observation)
+
+    async def retrieve(
+        self,
+        text: str,
+        k: int,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None
+    ) -> List[Observation]:
+        """
+        Retrieve the most relevant observations for the given text.
+        
+        Uses vector similarity search in the database.
+        
+        Args:
+            text: Query text to find similar observations
+            k: Number of observations to retrieve
+            from_date: Optional filter for created_at >= from_date
+            to_date: Optional filter for created_at <= to_date
             
         Returns:
-            New MemoryStream instance
+            List of observations sorted by creation time
         """
-        stream = cls()
-        stream.last_reflection_point = data.get("last_reflection_point", 0)
+        # Generate query embedding
+        query_embedding = list(self.embedding_model.query_embed(text))[0]
         
-        for mem_data in data.get("memories", []):
-            observation = Observation.from_dict(mem_data)
-            stream.memories.append(observation)
+        # Use database vector search
+        observations = await self._storage.ms_search(
+            self._ms_id,
+            list(query_embedding),
+            k,
+            from_date,
+            to_date
+        )
         
-        return stream
+        # Update accessed timestamps
+        obs_ids = [getattr(obs, '_db_id', None) for obs in observations]
+        obs_ids = [oid for oid in obs_ids if oid is not None]
+        if obs_ids:
+            await self._storage.ms_update_accessed(obs_ids)
+        
+        # Sort by creation time
+        observations.sort(key=lambda x: x.created)
+        return observations
+
+    async def retrieve_recent(self, n: int) -> List[Observation]:
+        """
+        Retrieve the N most recent observations.
+        
+        Returns observations in chronological order (oldest first).
+        
+        Args:
+            n: Number of observations to retrieve
+            
+        Returns:
+            List of observations sorted by creation time (oldest first)
+        """
+        return await self._storage.ms_get_recent(self._ms_id, n)
+
+    async def get_metadata(self) -> Dict[str, Any]:
+        """
+        Get memory stream metadata.
+        
+        Returns:
+            Dict with last_reflection_point and other metadata
+        """
+        return await self._storage.ms_get_metadata(self._ms_id)
+    
+    async def update_metadata(self, metadata: Dict[str, Any]) -> None:
+        """
+        Update memory stream metadata.
+        
+        Args:
+            metadata: Dict with metadata to update
+        """
+        if "last_reflection_point" in metadata:
+            self.last_reflection_point = metadata["last_reflection_point"]
+        
+        await self._storage.ms_update_metadata(self._ms_id, metadata)
