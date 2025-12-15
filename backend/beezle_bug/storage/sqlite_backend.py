@@ -1,7 +1,8 @@
 """
 SQLite storage backend implementation.
 
-Uses aiosqlite for async operations and sqlite-vec for vector similarity search.
+Uses SQLModel for project/node/edge ORM operations.
+Uses aiosqlite + sqlite-vec for vector similarity search on observation embeddings.
 """
 
 import json
@@ -10,6 +11,9 @@ from typing import TYPE_CHECKING, Optional
 
 import aiosqlite
 import sqlite_vec
+from sqlmodel import SQLModel, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 if TYPE_CHECKING:
     from beezle_bug.project import Project
@@ -17,12 +21,14 @@ if TYPE_CHECKING:
     from beezle_bug.memory.memories import Observation
 
 from .base import StorageBackend
+from beezle_bug.models import ProjectDB, NodeDB, EdgeDB
 
 
 class SQLiteStorageBackend(StorageBackend):
     """
     SQLite implementation of StorageBackend.
     
+    Uses SQLModel for project CRUD operations.
     Uses sqlite-vec extension for vector similarity search on observation embeddings.
     """
     
@@ -37,12 +43,31 @@ class SQLiteStorageBackend(StorageBackend):
             db_path: Path to SQLite database file
         """
         self.db_path = db_path
+        self._engine = None
+        self._session_factory = None
+        # Keep aiosqlite connection for sqlite-vec operations
         self._conn: Optional[aiosqlite.Connection] = None
     
     # === Lifecycle ===
     
     async def initialize(self) -> None:
         """Initialize database connection and create schema."""
+        # Create SQLAlchemy async engine for SQLModel
+        self._engine = create_async_engine(
+            f"sqlite+aiosqlite:///{self.db_path}",
+            echo=False,
+        )
+        self._session_factory = async_sessionmaker(
+            self._engine, 
+            class_=AsyncSession, 
+            expire_on_commit=False
+        )
+        
+        # Create SQLModel tables
+        async with self._engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        
+        # Also keep aiosqlite connection for sqlite-vec and legacy operations
         self._conn = await aiosqlite.connect(self.db_path)
         self._conn.row_factory = aiosqlite.Row
         
@@ -54,22 +79,13 @@ class SQLiteStorageBackend(StorageBackend):
         await self._conn.load_extension(sqlite_vec.loadable_path())
         await self._conn.enable_load_extension(False)
         
-        # Create schema
-        await self._create_schema()
+        # Create additional schema for KG and memory streams
+        await self._create_legacy_schema()
         await self._conn.commit()
     
-    async def _create_schema(self) -> None:
-        """Create database tables if they don't exist."""
+    async def _create_legacy_schema(self) -> None:
+        """Create database tables for knowledge graphs and memory streams."""
         await self._conn.executescript("""
-            -- Projects table
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                data JSON NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
-            );
-            
             -- Knowledge Graphs (one per KG node in a project)
             CREATE TABLE IF NOT EXISTS knowledge_graphs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,7 +150,6 @@ class SQLiteStorageBackend(StorageBackend):
         """)
         
         # Create sqlite-vec virtual table for embeddings
-        # This needs to be done separately as it's not standard SQL
         try:
             await self._conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS observation_vectors 
@@ -148,58 +163,97 @@ class SQLiteStorageBackend(StorageBackend):
             pass
     
     async def close(self) -> None:
-        """Close database connection."""
+        """Close database connections."""
         if self._conn:
             await self._conn.close()
             self._conn = None
+        if self._engine:
+            await self._engine.dispose()
+            self._engine = None
     
-    # === Project Operations ===
+    # === Project Operations (SQLModel) ===
     
     async def list_projects(self) -> list[dict]:
         """List all projects with metadata."""
-        cursor = await self._conn.execute("""
-            SELECT id, name, created_at, updated_at
-            FROM projects
-            ORDER BY updated_at DESC
-        """)
-        rows = await cursor.fetchall()
-        return [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ProjectDB).order_by(ProjectDB.updated_at.desc())
+            )
+            projects = result.scalars().all()
+            return [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "created_at": p.created_at.isoformat() if p.created_at else None,
+                    "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+                }
+                for p in projects
+            ]
     
     async def get_project(self, project_id: str) -> Optional["Project"]:
         """Get a project by ID."""
-        from beezle_bug.project import Project
-        
-        cursor = await self._conn.execute(
-            "SELECT data FROM projects WHERE id = ?",
-            (project_id,)
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        
-        data = json.loads(row["data"])
-        return Project.model_validate(data)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ProjectDB)
+                .options(selectinload(ProjectDB.nodes), selectinload(ProjectDB.edges))
+                .where(ProjectDB.id == project_id)
+            )
+            project_db = result.scalar_one_or_none()
+            if project_db is None:
+                return None
+            return project_db.to_pydantic()
     
     async def save_project(self, project: "Project") -> None:
         """Save or update a project."""
-        data = json.dumps(project.model_dump(mode="json"), default=str)
-        await self._conn.execute("""
-            INSERT INTO projects (id, name, data, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                data = excluded.data,
-                updated_at = datetime('now')
-        """, (project.id, project.name, data))
-        await self._conn.commit()
+        from sqlalchemy import delete
+        
+        async with self._session_factory() as session:
+            # Check if project exists
+            result = await session.execute(
+                select(ProjectDB).where(ProjectDB.id == project.id)
+            )
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                # Update existing project
+                existing.name = project.name
+                existing.tts_settings = project.tts_settings.model_dump()
+                existing.stt_settings = project.stt_settings.model_dump()
+                existing.updated_at = datetime.utcnow()
+                
+                # Delete existing nodes and edges using DELETE statements
+                # (avoid lazy-loading relationship access)
+                await session.execute(
+                    delete(EdgeDB).where(EdgeDB.project_id == project.id)
+                )
+                await session.execute(
+                    delete(NodeDB).where(NodeDB.project_id == project.id)
+                )
+                
+                # Add new nodes and edges
+                for node in project.agent_graph.nodes:
+                    node_db = NodeDB.from_pydantic(node, project.id)
+                    session.add(node_db)
+                
+                for edge in project.agent_graph.edges:
+                    edge_db = EdgeDB.from_pydantic(edge, project.id)
+                    session.add(edge_db)
+            else:
+                # Create new project
+                project_db = ProjectDB.from_pydantic(project)
+                session.add(project_db)
+                
+                # Add nodes
+                for node in project.agent_graph.nodes:
+                    node_db = NodeDB.from_pydantic(node, project.id)
+                    session.add(node_db)
+                
+                # Add edges
+                for edge in project.agent_graph.edges:
+                    edge_db = EdgeDB.from_pydantic(edge, project.id)
+                    session.add(edge_db)
+            
+            await session.commit()
     
     async def delete_project(self, project_id: str) -> None:
         """Delete a project and all associated data."""
@@ -212,28 +266,41 @@ class SQLiteStorageBackend(StorageBackend):
                 WHERE ms.project_id = ?
             )
         """, (project_id,))
+        await self._conn.commit()
         
-        # Cascade delete handles the rest
+        # Delete project (cascade handles nodes, edges)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ProjectDB).where(ProjectDB.id == project_id)
+            )
+            project = result.scalar_one_or_none()
+            if project:
+                await session.delete(project)
+                await session.commit()
+        
+        # Delete KG and memory stream data
         await self._conn.execute(
-            "DELETE FROM projects WHERE id = ?",
+            "DELETE FROM knowledge_graphs WHERE project_id = ?",
+            (project_id,)
+        )
+        await self._conn.execute(
+            "DELETE FROM memory_streams WHERE project_id = ?",
             (project_id,)
         )
         await self._conn.commit()
     
     async def project_exists(self, project_id: str) -> bool:
         """Check if a project exists."""
-        cursor = await self._conn.execute(
-            "SELECT 1 FROM projects WHERE id = ?",
-            (project_id,)
-        )
-        row = await cursor.fetchone()
-        return row is not None
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ProjectDB.id).where(ProjectDB.id == project_id)
+            )
+            return result.scalar_one_or_none() is not None
     
-    # === Knowledge Graph Operations ===
+    # === Knowledge Graph Operations (aiosqlite) ===
     
     async def kg_ensure(self, project_id: str, node_id: str) -> int:
         """Ensure a knowledge graph exists, return its ID."""
-        # Try to get existing
         cursor = await self._conn.execute(
             "SELECT id FROM knowledge_graphs WHERE project_id = ? AND node_id = ?",
             (project_id, node_id)
@@ -242,7 +309,6 @@ class SQLiteStorageBackend(StorageBackend):
         if row:
             return row["id"]
         
-        # Create new
         cursor = await self._conn.execute("""
             INSERT INTO knowledge_graphs (project_id, node_id)
             VALUES (?, ?)
@@ -287,7 +353,6 @@ class SQLiteStorageBackend(StorageBackend):
         prop_value: str
     ) -> None:
         """Add or update a single property on an entity."""
-        # Get current properties
         cursor = await self._conn.execute("""
             SELECT id, properties FROM kg_entities
             WHERE knowledge_graph_id = ? AND entity_name = ?
@@ -333,7 +398,6 @@ class SQLiteStorageBackend(StorageBackend):
     
     async def kg_remove_entity(self, kg_id: int, entity_name: str) -> None:
         """Remove an entity and all its relationships."""
-        # Get entity ID first
         cursor = await self._conn.execute("""
             SELECT id FROM kg_entities
             WHERE knowledge_graph_id = ? AND entity_name = ?
@@ -344,13 +408,11 @@ class SQLiteStorageBackend(StorageBackend):
         
         entity_id = row["id"]
         
-        # Delete relationships involving this entity
         await self._conn.execute("""
             DELETE FROM kg_relationships
             WHERE from_entity_id = ? OR to_entity_id = ?
         """, (entity_id, entity_id))
         
-        # Delete the entity
         await self._conn.execute(
             "DELETE FROM kg_entities WHERE id = ?",
             (entity_id,)
@@ -375,7 +437,6 @@ class SQLiteStorageBackend(StorageBackend):
         properties: dict
     ) -> int:
         """Add a relationship between two entities."""
-        # Get entity IDs
         from_id = await self.kg_get_entity_id(kg_id, from_entity_name)
         to_id = await self.kg_get_entity_id(kg_id, to_entity_name)
         
@@ -489,7 +550,6 @@ class SQLiteStorageBackend(StorageBackend):
         """Load the full knowledge graph into a KnowledgeGraph instance."""
         from beezle_bug.memory.knowledge_graph import KnowledgeGraph
         
-        # Get knowledge graph ID
         cursor = await self._conn.execute(
             "SELECT id FROM knowledge_graphs WHERE project_id = ? AND node_id = ?",
             (project_id, node_id)
@@ -534,11 +594,10 @@ class SQLiteStorageBackend(StorageBackend):
         
         return kg
     
-    # === Memory Stream Operations ===
+    # === Memory Stream Operations (aiosqlite) ===
     
     async def ms_ensure(self, project_id: str, node_id: str) -> int:
         """Ensure a memory stream exists, return its ID."""
-        # Try to get existing
         cursor = await self._conn.execute(
             "SELECT id FROM memory_streams WHERE project_id = ? AND node_id = ?",
             (project_id, node_id)
@@ -547,7 +606,6 @@ class SQLiteStorageBackend(StorageBackend):
         if row:
             return row["id"]
         
-        # Create new
         cursor = await self._conn.execute("""
             INSERT INTO memory_streams (project_id, node_id)
             VALUES (?, ?)
@@ -567,7 +625,6 @@ class SQLiteStorageBackend(StorageBackend):
             else observation.content.dict()
         )
         
-        # Insert observation
         cursor = await self._conn.execute("""
             INSERT INTO observations 
             (memory_stream_id, content_type, content, importance, created_at, accessed_at)
@@ -607,7 +664,6 @@ class SQLiteStorageBackend(StorageBackend):
         from beezle_bug.memory.memories import Observation
         from beezle_bug.llm_adapter import Message, ToolCallResult, Response
         
-        # Build query with optional date filters
         query = """
             SELECT o.id, o.content_type, o.content, o.importance, 
                    o.created_at, o.accessed_at, v.distance
@@ -636,7 +692,6 @@ class SQLiteStorageBackend(StorageBackend):
             content_type = row["content_type"]
             content_data = json.loads(row["content"])
             
-            # Reconstruct content object
             if content_type == "Message":
                 content = Message(**content_data)
             elif content_type == "ToolCallResult":
@@ -646,7 +701,6 @@ class SQLiteStorageBackend(StorageBackend):
             else:
                 content = Message(**content_data)
             
-            # Get embedding for this observation
             vec_cursor = await self._conn.execute("""
                 SELECT embedding FROM observation_vectors 
                 WHERE observation_id = ?
@@ -661,7 +715,6 @@ class SQLiteStorageBackend(StorageBackend):
                 embedding=list(embedding),
                 content=content
             )
-            # Store the database ID for updating accessed timestamp
             obs._db_id = row["id"]
             observations.append(obs)
         
@@ -713,9 +766,49 @@ class SQLiteStorageBackend(StorageBackend):
                 WHERE id = ?
             """, (metadata["last_reflection_point"], ms_id))
             await self._conn.commit()
-
-
-
-
-
-
+    
+    async def ms_get_recent(
+        self,
+        ms_id: int,
+        n: int
+    ) -> list["Observation"]:
+        """Get the N most recent observations for a memory stream (chronological order)."""
+        import json
+        from beezle_bug.memory.memories import Observation
+        from beezle_bug.llm_adapter import Message, ToolCallResult, Response
+        
+        cursor = await self._conn.execute("""
+            SELECT id, content_type, content, importance, created_at, accessed_at
+            FROM observations 
+            WHERE memory_stream_id = ?
+            ORDER BY created_at DESC 
+            LIMIT ?
+        """, (ms_id, n))
+        rows = await cursor.fetchall()
+        
+        observations = []
+        for row in rows:
+            content_type = row["content_type"]
+            content_data = json.loads(row["content"])
+            
+            # Reconstruct the content object
+            if content_type == "ToolCallResult":
+                content = ToolCallResult(**content_data)
+            elif content_type == "Response":
+                content = Response(**content_data)
+            else:
+                content = Message(**content_data)
+            
+            obs = Observation(
+                created=datetime.fromisoformat(row["created_at"]),
+                accessed=datetime.fromisoformat(row["accessed_at"]),
+                importance=row["importance"],
+                embedding=[],  # Not needed for recent retrieval
+                content=content
+            )
+            obs._db_id = row["id"]
+            observations.append(obs)
+        
+        # Reverse to get chronological order (oldest first)
+        observations.reverse()
+        return observations

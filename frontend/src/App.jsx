@@ -104,6 +104,14 @@ function DesktopApp() {
         audio.play().catch(err => console.error('Failed to play TTS audio:', err));
       }
     }
+    
+    function onSttActivated() {
+      // Stop TTS audio immediately when VAD detects user is speaking
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current = null;
+      }
+    }
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -113,6 +121,7 @@ function DesktopApp() {
     socket.on('project_stopped', onProjectStopped);
     socket.on('chat_message', onChatMessage);
     socket.on('tts_audio', onTtsAudio);
+    socket.on('stt_activated', onSttActivated);
     socket.connect();
 
     return () => {
@@ -124,6 +133,7 @@ function DesktopApp() {
       socket.off('project_stopped', onProjectStopped);
       socket.off('chat_message', onChatMessage);
       socket.off('tts_audio', onTtsAudio);
+      socket.off('stt_activated', onSttActivated);
       socket.disconnect();
     };
   }, []);

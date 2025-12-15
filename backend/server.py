@@ -38,8 +38,9 @@ from beezle_bug.agent_graph import (
     KnowledgeGraphNodeConfig,
     MemoryStreamNodeConfig,
     ToolboxNodeConfig,
-    UserInputNodeConfig,
-    UserOutputNodeConfig,
+    TextInputNodeConfig,
+    VoiceInputNodeConfig,
+    TextOutputNodeConfig,
     ScheduledEventNodeConfig,
     WaitAndCombineNodeConfig,
 )
@@ -294,6 +295,8 @@ async def send_message(sid, data):
     
     logger.info(f"Message from {sid}: {data}")
     await sio.emit("chat_message", data, room=sid)  # Echo user message to sender
+    # Force event loop to flush the socket buffer before starting agent processing
+    await asyncio.sleep(0.01)
     
     user = data.get("user", "User")
     message = data.get("message", "")
@@ -301,6 +304,43 @@ async def send_message(sid, data):
     # If an agent graph project is active, route through it
     if project_manager.current_project and runtime.agents:
         responses = await runtime.send_user_message(message, user)
+        
+        for resp in responses:
+            logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
+            
+            # Check this client's TTS preference
+            prefs = _client_preferences.get(sid, {})
+            if prefs.get("tts_enabled") and tts_instance is not None:
+                try:
+                    audio_bytes = tts_instance.synthesize(resp["response"])
+                    if audio_bytes:
+                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                        await sio.emit("tts_audio", {
+                            "audioUrl": f"data:audio/wav;base64,{audio_b64}"
+                        }, room=sid)
+                        logger.info(f"Generated TTS audio for client {sid}: {len(audio_bytes)} bytes")
+                except Exception as e:
+                    logger.error(f"TTS synthesis failed: {e}")
+
+
+@sio.event
+async def send_voice_message(sid, data):
+    """Handle voice-transcribed messages from users (routes through VoiceInput node)."""
+    global tts_instance
+    
+    logger.info(f"Voice message from {sid}: {data}")
+    # Broadcast user message to ALL clients immediately (before agent processing)
+    await sio.emit("chat_message", data)
+    # Force event loop to flush the socket buffer before starting agent processing
+    await asyncio.sleep(0.01)
+    logger.debug(f"Broadcasted voice message to all clients")
+    
+    user = data.get("user", "User")
+    message = data.get("message", "")
+    
+    # If an agent graph project is active, route through voice input node
+    if project_manager.current_project and runtime.agents:
+        responses = await runtime.send_voice_message(message, user)
         
         for resp in responses:
             logger.debug(f"Agent graph response from {resp['agent_name']}: {resp['response'][:50]}...")
@@ -563,10 +603,12 @@ async def add_node(sid, data):
             config = MemoryStreamNodeConfig(**config_data)
         elif node_type == NodeType.TOOLBOX:
             config = ToolboxNodeConfig(**config_data)
-        elif node_type == NodeType.USER_INPUT:
-            config = UserInputNodeConfig(**config_data)
-        elif node_type == NodeType.USER_OUTPUT:
-            config = UserOutputNodeConfig(**config_data)
+        elif node_type == NodeType.TEXT_INPUT:
+            config = TextInputNodeConfig(**config_data)
+        elif node_type == NodeType.VOICE_INPUT:
+            config = VoiceInputNodeConfig(**config_data)
+        elif node_type == NodeType.TEXT_OUTPUT:
+            config = TextOutputNodeConfig(**config_data)
         elif node_type == NodeType.SCHEDULED_EVENT:
             config = ScheduledEventNodeConfig(**config_data)
         elif node_type == NodeType.WAIT_AND_COMBINE:
@@ -902,9 +944,9 @@ async def download_tts_voice(sid, data):
 
 @sio.event
 async def get_stt_settings(sid):
-    """Get current STT settings from project."""
+    """Get current STT settings from project (project-level config, NOT per-client enabled state)."""
+    # Note: "enabled" is per-client, not included here
     settings = {
-        "enabled": False,
         "device_id": None,
         "device_label": None,
         "wake_words": ["hey beezle", "ok beezle"],
@@ -915,7 +957,6 @@ async def get_stt_settings(sid):
     if project_manager.current_project:
         stt = project_manager.current_project.stt_settings
         settings = {
-            "enabled": stt.enabled,
             "device_id": stt.device_id,
             "device_label": stt.device_label,
             "wake_words": stt.wake_words,
@@ -935,6 +976,9 @@ async def set_stt_enabled(sid, data):
         _client_preferences[sid] = {}
     _client_preferences[sid]["stt_enabled"] = enabled
     
+    # Emit back to client so Chat component can react
+    await sio.emit("stt_enabled_changed", {"enabled": enabled}, room=sid)
+    
     logger.info(f"Client {sid} STT preference: {enabled}")
 
 
@@ -948,16 +992,15 @@ async def set_skip_wake_word(sid, data):
 
 @sio.event
 async def set_stt_settings(sid, data):
-    """Update STT settings."""
+    """Update STT settings (project-level config, NOT per-client enabled state)."""
     if not project_manager.current_project:
         await sio.emit("error", {"message": "No project loaded"}, room=sid)
         return
     
     stt = project_manager.current_project.stt_settings
     
-    if "enabled" in data:
-        stt.enabled = data["enabled"]
-        logger.info(f"STT {'enabled' if stt.enabled else 'disabled'}")
+    # Note: "enabled" is now per-client, handled by set_stt_enabled
+    # This handler only manages project-level config (device, wake words, etc.)
     
     if "device_id" in data:
         stt.device_id = data["device_id"]
@@ -974,8 +1017,158 @@ async def set_stt_settings(sid, data):
     if "max_duration" in data:
         stt.max_duration = float(data["max_duration"])
     
-    # Emit updated settings
-    await get_stt_settings(sid)
+    # Broadcast updated settings to ALL connected clients
+    # Note: "enabled" is excluded - it's per-client
+    settings = {
+        "device_id": stt.device_id,
+        "device_label": stt.device_label,
+        "wake_words": stt.wake_words,
+        "stop_words": stt.stop_words,
+        "max_duration": stt.max_duration,
+    }
+    await sio.emit("stt_settings", settings)  # Broadcast to all
+    logger.info(f"STT settings updated")
+
+
+# ==================== STT Streaming ====================
+
+# Per-client audio buffers for streaming STT
+_stt_audio_buffers: dict[str, dict] = {}
+
+@sio.event
+async def stt_stream_start(sid, data):
+    """Start a new STT streaming session."""
+    skip_wake_word = data.get("skip_wake_word", False)
+    
+    # Initialize audio buffer for this client
+    _stt_audio_buffers[sid] = {
+        "chunks": [],
+        "skip_wake_word": skip_wake_word,
+        "active": skip_wake_word,  # If skipping wake word, start active immediately
+    }
+    
+    if skip_wake_word:
+        await sio.emit("stt_activated", room=sid)
+    
+    logger.info(f"STT stream started for {sid} (skip_wake_word={skip_wake_word})")
+
+
+@sio.event
+async def stt_stream_chunk(sid, data):
+    """Receive an audio chunk for STT processing."""
+    import base64
+    
+    # Auto-create session if it doesn't exist (handles race conditions)
+    if sid not in _stt_audio_buffers:
+        _stt_audio_buffers[sid] = {
+            "chunks": [],
+            "skip_wake_word": False,
+            "active": False,
+        }
+    
+    buffer = _stt_audio_buffers[sid]
+    audio_b64 = data.get("audio", "")
+    speech_detected = data.get("speech", True)
+    
+    if audio_b64:
+        try:
+            audio_bytes = base64.b64decode(audio_b64)
+            buffer["chunks"].append(audio_bytes)
+        except Exception as e:
+            logger.error(f"Failed to decode audio chunk: {e}")
+    
+    # Update state based on speech detection
+    if speech_detected and not buffer["active"]:
+        buffer["active"] = True
+        await sio.emit("stt_activated", room=sid)
+    elif not speech_detected and buffer["active"]:
+        # Speech ended - transcribe what we have
+        if buffer["chunks"]:
+            await _transcribe_and_send(sid, buffer)
+
+
+@sio.event
+async def stt_stream_stop(sid):
+    """Stop STT streaming and transcribe any remaining audio."""
+    if sid in _stt_audio_buffers:
+        buffer = _stt_audio_buffers[sid]
+        
+        # Transcribe any remaining audio
+        if buffer["chunks"]:
+            await _transcribe_and_send(sid, buffer)
+        
+        del _stt_audio_buffers[sid]
+    
+    await sio.emit("stt_deactivated", room=sid)
+    logger.debug(f"STT stream stopped for {sid}")
+
+
+async def _transcribe_and_send(sid: str, buffer: dict):
+    """Transcribe accumulated audio and send the result."""
+    from beezle_bug.voice.transcriber import get_transcriber
+    import struct
+    
+    if not buffer["chunks"]:
+        return
+    
+    try:
+        # Combine all chunks into one audio buffer
+        all_audio = b"".join(buffer["chunks"])
+        
+        # Create WAV header for the raw PCM data
+        # The frontend sends 16-bit mono PCM at 16000 Hz
+        sample_rate = 16000
+        num_channels = 1
+        bits_per_sample = 16
+        num_samples = len(all_audio) // 2
+        
+        wav_header = struct.pack(
+            '<4sI4s4sIHHIIHH4sI',
+            b'RIFF',
+            36 + len(all_audio),
+            b'WAVE',
+            b'fmt ',
+            16,  # PCM format chunk size
+            1,   # Audio format (PCM)
+            num_channels,
+            sample_rate,
+            sample_rate * num_channels * bits_per_sample // 8,  # Byte rate
+            num_channels * bits_per_sample // 8,  # Block align
+            bits_per_sample,
+            b'data',
+            len(all_audio)
+        )
+        
+        wav_data = wav_header + all_audio
+        
+        # Get transcriber and transcribe
+        transcriber = get_transcriber()
+        text = transcriber.transcribe(wav_data)
+        
+        if text and text.strip():
+            logger.info(f"Transcribed for {sid}: '{text}' - emitting stt_final_text")
+            await sio.emit("stt_final_text", {"text": text}, room=sid)
+            logger.debug(f"stt_final_text emitted to {sid}")
+        
+        # Clear the buffer
+        buffer["chunks"] = []
+        buffer["active"] = False
+        
+    except Exception as e:
+        logger.error(f"Transcription failed for {sid}: {e}")
+        buffer["chunks"] = []
+        buffer["active"] = False
+
+
+# ==================== General Settings ====================
+
+@sio.event
+async def get_general_settings(sid):
+    """Get current general settings."""
+    settings = {
+        "storage_backend": DB_BACKEND,
+    }
+    await sio.emit("general_settings", settings, room=sid)
 
 
 # ==================== Main ====================

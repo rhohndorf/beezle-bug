@@ -27,13 +27,17 @@ class Agent:
     The Agent class provides a conversation interface with tool calling capabilities.
     It is triggered by messages from users, other agents, event nodes, or WaitAndCombine nodes.
     
+    Agents can operate in two modes:
+    - **Stateful** (with memory_stream): History is persisted to database, retrieved on each call
+    - **Stateless** (no memory_stream): Only uses messages passed to process_message, no persistence
+    
     All operations are async to support storage-backed memory and knowledge graph.
     
     Attributes:
         name: The agent's name
         adapter: LLM adapter for generating completions
         toolbox: Collection of available tools
-        memory_stream: Stream of conversation history
+        memory_stream: Optional stream of conversation history
         knowledge_graph: Structured knowledge storage
         event_bus: Optional event bus for introspection
     """
@@ -59,14 +63,14 @@ class Agent:
             toolbox: Collection of available tools
             system_template: Jinja2 template for system message
             event_bus: Optional event bus for emitting introspection events
-            memory_stream: Optional shared memory stream (creates new if None)
+            memory_stream: Optional memory stream for persistence (stateless if None)
             knowledge_graph: Optional shared knowledge graph (creates new if None)
         """
         self.id = id
         self.name = name
         self.adapter = adapter
         self.toolbox = toolbox
-        self.memory_stream = memory_stream if memory_stream is not None else MemoryStream()
+        self.memory_stream = memory_stream
         self.knowledge_graph = knowledge_graph if knowledge_graph is not None else KnowledgeGraph()
         self.event_bus = event_bus
         self.system_message_template = system_template
@@ -87,60 +91,60 @@ class Agent:
         This is the main entry point for all agent interactions, whether from
         users, other agents, event nodes, or WaitAndCombine nodes.
         
+        Behavior depends on memory_stream presence:
+        - With memory_stream: Retrieves history from DB, stores messages and responses
+        - Without memory_stream: Only uses incoming messages, no persistence (stateless)
+        
         Args:
             messages: List of message dicts, each with "sender" and "content" keys
             
         Returns:
             List of response message dicts with "sender" (this agent's name) and "content"
         """
-        # Emit and add all messages to memory before thinking
+        # Emit message received events
         for msg in messages:
             self._emit(EventType.MESSAGE_RECEIVED, {
                 "from": msg["sender"],
                 "content": msg["content"]
             })
-            await self.memory_stream.add(Message(role="user", content=f"[{msg['sender']}]: {msg['content']}"))
         
-        # Generate response (once, after all messages are added)
-        response = await self._think()
-        
-        # Return as list of message dicts
-        if response:
-            return [{"sender": self.name, "content": response}]
-        return []
-
-    async def _think(self) -> Optional[str]:
-        """
-        Core thinking loop - generates LLM response and executes tools.
-        
-        Returns:
-            Final response content, or None
-        """
-        # Build context with current datetime for time-aware templates
+        # Build system message
         system_message = self.system_message_template.render(
             agent=self,
             now=datetime.now(),
             entity_schemas=get_schema_for_prompt()
         )
         
-        # Get recent memories for context
-        # For now, use in-memory list if available, otherwise just use system message
-        recent_memories = []
-        if hasattr(self.memory_stream, 'memories') and self.memory_stream.memories:
-            recent_memories = [mem.content for mem in self.memory_stream.memories[-DEFAULT_MSG_BUFFER_SIZE:]]
+        # Get history based on memory_stream presence
+        if self.memory_stream:   
+            # Store incoming messages to memory
+            for msg in messages:
+                await self.memory_stream.add(
+                    Message(role="user", content=f"[{msg['sender']}]: {msg['content']}")
+                )
+
+            # Stateful: Query database for recent history
+            recent_observations = await self.memory_stream.retrieve_recent(n=DEFAULT_MSG_BUFFER_SIZE)
+            history = [obs.content for obs in recent_observations]
+        else:
+            # Stateless: Only use incoming messages
+            history = [
+                Message(role="user", content=f"[{msg['sender']}]: {msg['content']}")
+                for msg in messages
+            ]
         
-        messages = [
-            Message(role="system", content=system_message)
-        ] + recent_memories
+        # Build LLM context
+        llm_messages = [Message(role="system", content=system_message)] + history
         
         self._emit(EventType.LLM_CALL_STARTED, {
-            "context_messages": len(messages),
+            "context_messages": len(llm_messages),
             "available_tools": len(self.toolbox.get_tools())
         })
         
+        # Call LLM
         try:
             start_time = time.time()
-            response = self.adapter.chat_completion(messages, self.toolbox.get_tools())
+            response = self.adapter.chat_completion(llm_messages, self.toolbox.get_tools())
             duration = (time.time() - start_time) * 1000
             
             response_content = getattr(response, 'content', None)
@@ -153,11 +157,9 @@ class Agent:
                 "tool_calls": tool_calls_count,
             }
             
-            # Include thinking/reasoning if present
             if response_reasoning:
                 event_data["thinking"] = response_reasoning
             
-            # Include content preview
             if response_content:
                 event_data["response_preview"] = (response_content[:200] + "...") if len(response_content) > 200 else response_content
             
@@ -166,10 +168,12 @@ class Agent:
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             self._emit(EventType.ERROR_OCCURRED, {"error": str(e)})
-            return None
+            return []
 
-        await self.memory_stream.add(response)
-        messages.append(response)
+        # Store response if memory_stream exists
+        if self.memory_stream:
+            await self.memory_stream.add(response)
+        llm_messages.append(response)
 
         # Process tool calls
         while response.tool_calls:
@@ -192,7 +196,6 @@ class Agent:
                     
                     if func_name in self.toolbox:
                         tool = self.toolbox.get_tool(func_name, json.loads(func_args))
-                        # Tools are now async
                         result_content = await tool.run(self)
                         result = ToolCallResult(
                             tool_call_id=tool_call.id,
@@ -217,8 +220,10 @@ class Agent:
                         "success": True
                     })
 
-                    await self.memory_stream.add(result)
-                    messages.append(result)
+                    # Store tool result if memory_stream exists
+                    if self.memory_stream:
+                        await self.memory_stream.add(result)
+                    llm_messages.append(result)
 
                 except Exception as e:
                     logger.error(f"Tool execution error: {e}")
@@ -233,17 +238,22 @@ class Agent:
                         content=f"Error: {e}",
                         role="tool"
                     )
-                    await self.memory_stream.add(result)
-                    messages.append(result)
+                    if self.memory_stream:
+                        await self.memory_stream.add(result)
+                    llm_messages.append(result)
             
             # Continue thinking after tool execution
             try:
-                response = self.adapter.chat_completion(messages, self.toolbox.get_tools())
-                await self.memory_stream.add(response)
-                messages.append(response)
+                response = self.adapter.chat_completion(llm_messages, self.toolbox.get_tools())
+                if self.memory_stream:
+                    await self.memory_stream.add(response)
+                llm_messages.append(response)
             except Exception as e:
                 logger.error(f"LLM call failed: {e}")
                 self._emit(EventType.ERROR_OCCURRED, {"error": str(e)})
-                return None
+                return []
 
-        return response.content
+        # Return response as list of message dicts
+        if response.content:
+            return [{"sender": self.name, "content": response.content}]
+        return []

@@ -14,9 +14,9 @@ export default function VoiceSettingsTab({ isDeployed = false }) {
   const [voices, setVoices] = useState([]);
   const [downloadingVoice, setDownloadingVoice] = useState(null);
   
-  // STT State
+  // STT State - sttEnabled is per-client, sttSettings are project-level config
+  const [sttEnabled, setSttEnabled] = useState(false); // Per-client toggle
   const [sttSettings, setSttSettings] = useState({
-    enabled: false,
     device_id: null,
     device_label: null,
     wake_words: ['hey beezle', 'ok beezle'],
@@ -123,6 +123,13 @@ export default function VoiceSettingsTab({ isDeployed = false }) {
     setSttSettings(newSettings);
     socket.emit('set_stt_settings', updates);
   };
+  
+  // Toggle per-client STT enabled state
+  const toggleSttEnabled = () => {
+    const newEnabled = !sttEnabled;
+    setSttEnabled(newEnabled);
+    socket.emit('set_stt_enabled', { enabled: newEnabled });
+  };
 
   const downloadVoice = (voiceKey) => {
     setDownloadingVoice(voiceKey);
@@ -218,15 +225,15 @@ export default function VoiceSettingsTab({ isDeployed = false }) {
               </div>
             </div>
             <button
-              onClick={() => isDeployed && updateSttSettings({ enabled: !sttSettings.enabled })}
+              onClick={() => isDeployed && toggleSttEnabled()}
               disabled={!isDeployed}
               className={`w-10 h-5 rounded-full transition-colors relative ${
-                sttSettings.enabled && isDeployed ? 'bg-[#22c55e]' : 'bg-[#333]'
+                sttEnabled && isDeployed ? 'bg-[#22c55e]' : 'bg-[#333]'
               } ${!isDeployed ? 'cursor-not-allowed' : 'cursor-pointer'}`}
             >
               <div
                 className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                  sttSettings.enabled && isDeployed ? 'translate-x-5' : 'translate-x-0.5'
+                  sttEnabled && isDeployed ? 'translate-x-5' : 'translate-x-0.5'
                 }`}
               />
             </button>

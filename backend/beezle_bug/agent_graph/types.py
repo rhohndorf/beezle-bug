@@ -15,8 +15,9 @@ class NodeType(str, Enum):
     KNOWLEDGE_GRAPH = "knowledge_graph"
     MEMORY_STREAM = "memory_stream"
     TOOLBOX = "toolbox"
-    USER_INPUT = "user_input"
-    USER_OUTPUT = "user_output"
+    TEXT_INPUT = "text_input"
+    VOICE_INPUT = "voice_input"
+    TEXT_OUTPUT = "text_output"
     SCHEDULED_EVENT = "scheduled_event"
     WAIT_AND_COMBINE = "wait_and_combine"
 
@@ -63,14 +64,19 @@ class ToolboxNodeConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
 
 
-class UserInputNodeConfig(BaseModel):
-    """Configuration for User Input node (chat entry point)."""
-    name: str = "User Chat"
+class TextInputNodeConfig(BaseModel):
+    """Configuration for Text Input node (typed text entry point)."""
+    name: str = "Text Input"
 
 
-class UserOutputNodeConfig(BaseModel):
-    """Configuration for User Output node (chat display)."""
-    name: str = "User Display"
+class VoiceInputNodeConfig(BaseModel):
+    """Configuration for Voice Input node (voice-transcribed text entry point)."""
+    name: str = "Voice Input"
+
+
+class TextOutputNodeConfig(BaseModel):
+    """Configuration for Text Output node (chat display)."""
+    name: str = "Text Output"
 
 
 class ScheduledEventNodeConfig(BaseModel):
@@ -93,8 +99,9 @@ NodeConfig = Union[
     KnowledgeGraphNodeConfig,
     MemoryStreamNodeConfig,
     ToolboxNodeConfig,
-    UserInputNodeConfig,
-    UserOutputNodeConfig,
+    TextInputNodeConfig,
+    VoiceInputNodeConfig,
+    TextOutputNodeConfig,
     ScheduledEventNodeConfig,
     WaitAndCombineNodeConfig,
 ]

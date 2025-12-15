@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, Calendar, Box, Volume2 } from 'lucide-react';
+import { Bot, Calendar, Box, Volume2, Settings } from 'lucide-react';
 import AgentControlTab from './AgentControlTab';
 import ScheduleTab from './ScheduleTab';
 import NodeInspectorTab from './NodeInspectorTab';
 import VoiceSettingsTab from './VoiceSettingsTab';
+import GeneralSettingsTab from './GeneralSettingsTab';
 
 export default function SettingsPanel({ selectedAgentGraphNode, isAgentGraphDeployed }) {
   const [activeTab, setActiveTab] = useState('agents');
@@ -63,6 +64,17 @@ export default function SettingsPanel({ selectedAgentGraphNode, isAgentGraphDepl
           <Volume2 size={14} />
           Voice
         </button>
+        <button
+          onClick={() => setActiveTab('general')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            activeTab === 'general' 
+              ? 'bg-[#1a1a1a] text-[#e5e5e5] border border-[#2b2b2b]' 
+              : 'text-[#888] hover:text-[#e5e5e5]'
+          }`}
+        >
+          <Settings size={14} />
+          General
+        </button>
       </div>
 
       {/* Tab Content */}
@@ -71,6 +83,7 @@ export default function SettingsPanel({ selectedAgentGraphNode, isAgentGraphDepl
         {activeTab === 'node' && <NodeInspectorTab selectedNode={selectedAgentGraphNode} isDeployed={isAgentGraphDeployed} />}
         {activeTab === 'schedule' && <ScheduleTab />}
         {activeTab === 'voice' && <VoiceSettingsTab isDeployed={isAgentGraphDeployed} />}
+        {activeTab === 'general' && <GeneralSettingsTab />}
       </div>
     </div>
   );

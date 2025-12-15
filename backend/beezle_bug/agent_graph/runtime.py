@@ -277,6 +277,9 @@ class AgentGraphRuntime:
         api_url = config.get("api_url", "http://127.0.0.1:1234/v1")
         api_key = config.get("api_key", "")
         system_template_name = config.get("system_template", "agent")
+        
+        # memory_stream is None if no MemoryStream node is connected
+        # Agent will be stateless in this case
 
         # Create toolbox from connected Toolbox node(s)
         toolbox = self.toolbox_factory(tools)
@@ -312,17 +315,17 @@ class AgentGraphRuntime:
             api_key=api_key,
         )
 
-        # Create agent with storage-aware KG and MS
-        # If no KG/MS connected, create in-memory ones (no storage)
+        # Create agent
+        # memory_stream is None if no MemoryStream node connected (stateless agent)
         agent = Agent(
             id=node.id,
             name=name,
             adapter=adapter,
             toolbox=toolbox,
-            event_bus=self.event_bus,
-            memory_stream=memory_stream if memory_stream is not None else MemoryStream(),
-            knowledge_graph=kg if kg is not None else KnowledgeGraph(),
             system_template=template,
+            event_bus=self.event_bus,
+            memory_stream=memory_stream,  # None = stateless
+            knowledge_graph=kg if kg is not None else KnowledgeGraph(),
         )
 
         self.agents[node.id] = agent
@@ -524,7 +527,7 @@ class AgentGraphRuntime:
             if not target_node:
                 continue
 
-            if target_node.type == NodeType.USER_OUTPUT:
+            if target_node.type == NodeType.TEXT_OUTPUT:
                 # Send each message to user output
                 if self.on_agent_graph_message:
                     for msg in messages:
@@ -553,18 +556,18 @@ class AgentGraphRuntime:
         if not self._current_agent_graph:
             return responses
 
-        # Find user input node
-        user_input_node = None
+        # Find text input node
+        text_input_node = None
         for node in self._current_agent_graph.nodes:
-            if node.type == NodeType.USER_INPUT:
-                user_input_node = node
+            if node.type == NodeType.TEXT_INPUT:
+                text_input_node = node
                 break
 
         # Create message in list format
         messages = [{"sender": user, "content": content}]
 
-        if not user_input_node:
-            # No user input node - send directly to all agents
+        if not text_input_node:
+            # No text input node - send directly to all agents
             for agent_id in self.agents.keys():
                 agent = self.agents.get(agent_id)
                 if not agent:
@@ -583,9 +586,9 @@ class AgentGraphRuntime:
                     })
                     await self._route_messages(agent_id, agent_name, response_messages)
         else:
-            # Route through user input node's connections
+            # Route through text input node's connections
             for edge in self._current_agent_graph.edges:
-                if edge.source_node != user_input_node.id:
+                if edge.source_node != text_input_node.id:
                     continue
                 if edge.edge_type != EdgeType.MESSAGE:
                     continue
@@ -612,7 +615,77 @@ class AgentGraphRuntime:
 
                 elif target_node.type == NodeType.WAIT_AND_COMBINE:
                     # Deliver to WaitAndCombine node
-                    await self._deliver_to_wait_and_combine(edge.target_node, user_input_node.id, messages)
+                    await self._deliver_to_wait_and_combine(edge.target_node, text_input_node.id, messages)
+
+        return responses
+
+    async def send_voice_message(self, content: str, user: str = "User") -> list[dict]:
+        """Send a voice-transcribed message through VoiceInput nodes."""
+        responses = []
+
+        if not self._current_agent_graph:
+            return responses
+
+        # Find voice input node
+        voice_input_node = None
+        for node in self._current_agent_graph.nodes:
+            if node.type == NodeType.VOICE_INPUT:
+                voice_input_node = node
+                break
+
+        # Create message in list format
+        messages = [{"sender": user, "content": content}]
+
+        if not voice_input_node:
+            # No voice input node - send directly to all agents (fallback behavior)
+            for agent_id in self.agents.keys():
+                agent = self.agents.get(agent_id)
+                if not agent:
+                    continue
+
+                agent_node = self._current_agent_graph.get_node(agent_id)
+                agent_name = agent_node.config.name if agent_node else "Agent"
+
+                response_messages = await agent.process_message(messages)
+
+                if response_messages:
+                    responses.append({
+                        "agent_id": agent_id,
+                        "agent_name": agent_name,
+                        "response": response_messages[0]["content"],
+                    })
+                    await self._route_messages(agent_id, agent_name, response_messages)
+        else:
+            # Route through voice input node's connections
+            for edge in self._current_agent_graph.edges:
+                if edge.source_node != voice_input_node.id:
+                    continue
+                if edge.edge_type != EdgeType.MESSAGE:
+                    continue
+
+                target_node = self._current_agent_graph.get_node(edge.target_node)
+                if not target_node:
+                    continue
+
+                if target_node.type == NodeType.AGENT:
+                    agent = self.agents.get(edge.target_node)
+                    if agent:
+                        agent_config = target_node.config if isinstance(target_node.config, dict) else target_node.config.model_dump()
+                        agent_name = agent_config.get("name", "Agent")
+
+                        response_messages = await agent.process_message(messages)
+
+                        if response_messages:
+                            responses.append({
+                                "agent_id": edge.target_node,
+                                "agent_name": agent_name,
+                                "response": response_messages[0]["content"],
+                            })
+                            await self._route_messages(edge.target_node, agent_name, response_messages)
+
+                elif target_node.type == NodeType.WAIT_AND_COMBINE:
+                    # Deliver to WaitAndCombine node
+                    await self._deliver_to_wait_and_combine(edge.target_node, voice_input_node.id, messages)
 
         return responses
 

@@ -41,13 +41,19 @@ class Node(BaseModel):
                 "outputs": [],
                 "bidirectional": ["connection"],
             }
-        elif self.type == NodeType.USER_INPUT:
+        elif self.type == NodeType.TEXT_INPUT:
             return {
                 "inputs": [],
                 "outputs": ["message_out"],
                 "bidirectional": [],
             }
-        elif self.type == NodeType.USER_OUTPUT:
+        elif self.type == NodeType.VOICE_INPUT:
+            return {
+                "inputs": [],
+                "outputs": ["message_out"],
+                "bidirectional": [],
+            }
+        elif self.type == NodeType.TEXT_OUTPUT:
             return {
                 "inputs": ["message_in"],
                 "outputs": [],
