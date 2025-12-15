@@ -9,16 +9,9 @@ from typing import List
 
 from beezle_bug.tools import ToolBox
 
-# Messaging tools
-from beezle_bug.tools.messaging import SendMessage
 
 # System tools
 from beezle_bug.tools.system import (
-    Wait,
-    Reason,
-    SetEngagement,
-    SelfReflect,
-    SelfCritique,
     GetDateAndTime,
 )
 
@@ -70,15 +63,8 @@ class ToolboxFactory:
     
     # Registry mapping tool names to tool classes
     registry = {
-        # Messaging
-        "send_message": SendMessage,
         
         # System
-        "wait": Wait,
-        "reason": Reason,
-        "set_engagement": SetEngagement,
-        "self_reflect": SelfReflect,
-        "self_critique": SelfCritique,
         "get_date_time": GetDateAndTime,
         
         # Python
