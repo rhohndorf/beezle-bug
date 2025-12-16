@@ -5,20 +5,13 @@ The Scheduler manages timed triggers for agents, allowing them to
 perform autonomous actions without explicit user input.
 """
 
-import time
+import asyncio
+import inspect
 from loguru import logger
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, Coroutine, Union
 from enum import Enum
-
-# Try to use eventlet if available (for Flask-SocketIO compatibility)
-try:
-    import eventlet
-    USING_EVENTLET = True
-except ImportError:
-    USING_EVENTLET = False
-    import threading
 
 
 class TriggerType(Enum):
@@ -34,7 +27,7 @@ class ScheduledTask:
     id: str
     agent_id: str
     trigger_type: TriggerType
-    callback: Callable[[], Any]
+    callback: Callable[[], Union[Any, Coroutine[Any, Any, Any]]]
     
     # For ONCE triggers
     run_at: Optional[datetime] = None
@@ -68,7 +61,7 @@ class Scheduler:
     """
     Manages scheduled tasks for agents.
     
-    The scheduler runs in a background greenlet/thread and executes callbacks
+    The scheduler runs as an asyncio task and executes callbacks
     based on configured schedules (e.g. sending messages to agents).
     """
     
@@ -82,33 +75,25 @@ class Scheduler:
         self.tasks: Dict[str, ScheduledTask] = {}
         self.tick_interval = tick_interval
         self.running = False
-        self._greenlet = None
-        self._thread = None
+        self._task: Optional[asyncio.Task] = None
         
     def start(self):
         """Start the scheduler background loop."""
         if not self.running:
             self.running = True
-            if USING_EVENTLET:
-                self._greenlet = eventlet.spawn(self._run_loop)
-                logger.info("Scheduler started (eventlet greenlet)")
-            else:
-                import threading
-                self._thread = threading.Thread(target=self._run_loop, daemon=True)
-                self._thread.start()
-                logger.info("Scheduler started (thread)")
+            self._task = asyncio.create_task(self._run_loop())
+            logger.info("Scheduler started (asyncio task)")
     
     def stop(self):
         """Stop the scheduler."""
         self.running = False
-        if USING_EVENTLET and self._greenlet:
-            self._greenlet.kill()
-        elif self._thread:
-            self._thread.join(timeout=5)
+        if self._task:
+            self._task.cancel()
+            self._task = None
         logger.info("Scheduler stopped")
     
-    def _run_loop(self):
-        """Main scheduler loop."""
+    async def _run_loop(self):
+        """Main scheduler loop (async)."""
         while self.running:
             now = datetime.now()
             
@@ -119,7 +104,12 @@ class Scheduler:
                 if task.should_run(now):
                     try:
                         logger.debug(f"Running task: {task.id}")
-                        task.callback()
+                        result = task.callback()
+                        
+                        # Await if the callback returned a coroutine
+                        if inspect.iscoroutine(result):
+                            await result
+                        
                         task.run_count += 1
                         task.last_run = now
                         
@@ -130,17 +120,13 @@ class Scheduler:
                     except Exception as e:
                         logger.error(f"Scheduler task {task.id} failed: {e}")
             
-            # Sleep using eventlet or time
-            if USING_EVENTLET:
-                eventlet.sleep(self.tick_interval)
-            else:
-                time.sleep(self.tick_interval)
+            await asyncio.sleep(self.tick_interval)
     
     def schedule_once(
         self, 
         task_id: str, 
         agent_id: str, 
-        callback: Callable[[], Any],
+        callback: Callable[[], Union[Any, Coroutine[Any, Any, Any]]],
         run_at: datetime
     ) -> ScheduledTask:
         """
@@ -149,7 +135,7 @@ class Scheduler:
         Args:
             task_id: Unique identifier for this task
             agent_id: Id of the agent this task belongs to
-            callback: Function to call when triggered
+            callback: Function to call when triggered (can be sync or async)
             run_at: When to run the task
             
         Returns:
@@ -171,7 +157,7 @@ class Scheduler:
         self,
         task_id: str,
         agent_id: str,
-        callback: Callable[[], Any],
+        callback: Callable[[], Union[Any, Coroutine[Any, Any, Any]]],
         interval_seconds: float,
         start_immediately: bool = False
     ) -> ScheduledTask:
@@ -181,7 +167,7 @@ class Scheduler:
         Args:
             task_id: Unique identifier for this task
             agent_id: Id of the agent this task belongs to
-            callback: Function to call when triggered
+            callback: Function to call when triggered (can be sync or async)
             interval_seconds: Seconds between executions
             start_immediately: If True, run immediately on first tick
             
