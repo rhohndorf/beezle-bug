@@ -38,11 +38,11 @@ from beezle_bug.agent_graph import (
     KnowledgeGraphNodeConfig,
     MemoryStreamNodeConfig,
     ToolboxNodeConfig,
-    TextInputNodeConfig,
-    VoiceInputNodeConfig,
+    TextInputEventNodeConfig,
+    VoiceInputEventNodeConfig,
     TextOutputNodeConfig,
     ScheduledEventNodeConfig,
-    WaitAndCombineNodeConfig,
+    MessageBufferNodeConfig,
 )
 from beezle_bug.project import TTSSettings, STTSettings
 from beezle_bug.voice.tts import PiperTTS, get_tts, PIPER_AVAILABLE
@@ -302,7 +302,7 @@ async def send_message(sid, data):
     message = data.get("message", "")
     
     # If an agent graph project is active, route through it
-    if project_manager.current_project and runtime.agents:
+    if project_manager.current_project and runtime.is_deployed:
         responses = await runtime.send_user_message(message, user)
         
         for resp in responses:
@@ -339,7 +339,7 @@ async def send_voice_message(sid, data):
     message = data.get("message", "")
     
     # If an agent graph project is active, route through voice input node
-    if project_manager.current_project and runtime.agents:
+    if project_manager.current_project and runtime.is_deployed:
         responses = await runtime.send_voice_message(message, user)
         
         for resp in responses:
@@ -567,7 +567,7 @@ async def get_node_kg_data(sid, data):
     if not node_id or not runtime._current_project_id:
         return
     
-    kg = runtime.knowledge_graphs.get(node_id)
+    kg = runtime.exec_graph.knowledge_graphs.get(node_id) if runtime.exec_graph else None
     if kg:
         kg_dict = kg.to_dict()
         entities = [
@@ -603,16 +603,16 @@ async def add_node(sid, data):
             config = MemoryStreamNodeConfig(**config_data)
         elif node_type == NodeType.TOOLBOX:
             config = ToolboxNodeConfig(**config_data)
-        elif node_type == NodeType.TEXT_INPUT:
-            config = TextInputNodeConfig(**config_data)
-        elif node_type == NodeType.VOICE_INPUT:
-            config = VoiceInputNodeConfig(**config_data)
+        elif node_type == NodeType.TEXT_INPUT_EVENT:
+            config = TextInputEventNodeConfig(**config_data)
+        elif node_type == NodeType.VOICE_INPUT_EVENT:
+            config = VoiceInputEventNodeConfig(**config_data)
         elif node_type == NodeType.TEXT_OUTPUT:
             config = TextOutputNodeConfig(**config_data)
         elif node_type == NodeType.SCHEDULED_EVENT:
             config = ScheduledEventNodeConfig(**config_data)
-        elif node_type == NodeType.WAIT_AND_COMBINE:
-            config = WaitAndCombineNodeConfig(**config_data)
+        elif node_type == NodeType.MESSAGE_BUFFER:
+            config = MessageBufferNodeConfig(**config_data)
         else:
             await sio.emit("error", {"message": f"Unknown node type: {node_type}"}, room=sid)
             return

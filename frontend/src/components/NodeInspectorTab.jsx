@@ -7,11 +7,11 @@ const NODE_ICONS = {
   knowledge_graph: Brain,
   memory_stream: Database,
   toolbox: Wrench,
-  text_input: MessageCircle,
-  voice_input: Mic,
+  text_input_event: MessageCircle,
+  voice_input_event: Mic,
   text_output: Monitor,
   scheduled_event: Clock,
-  wait_and_combine: GitMerge,
+  message_buffer: GitMerge,
 };
 
 const NODE_COLORS = {
@@ -19,11 +19,11 @@ const NODE_COLORS = {
   knowledge_graph: '#a855f7',
   memory_stream: '#22c55e',
   toolbox: '#f97316',
-  text_input: '#eab308',
-  voice_input: '#8b5cf6',
+  text_input_event: '#eab308',
+  voice_input_event: '#8b5cf6',
   text_output: '#ef4444',
   scheduled_event: '#06b6d4',
-  wait_and_combine: '#ec4899',
+  message_buffer: '#ec4899',
 };
 
 // Knowledge Graph display component
@@ -396,6 +396,22 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
               </select>
             </div>
 
+            <div>
+              <label className="text-[10px] text-[#666] uppercase tracking-wide block mb-1">Context Size</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={config.context_size || 25}
+                onChange={(e) => updateConfig('context_size', parseInt(e.target.value))}
+                disabled={isDeployed}
+                className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#2b2b2b] rounded text-xs text-[#e5e5e5] disabled:opacity-50 focus:outline-none focus:border-[#3b82f6]"
+              />
+              <p className="text-[10px] text-[#555] mt-1">
+                Number of recent messages to load from memory (requires connected Memory Stream).
+              </p>
+            </div>
+
             <div className="text-xs text-[#555] p-3 bg-[#1a1a1a] rounded border border-[#2b2b2b]">
               Connect a <span className="text-[#f97316]">Toolbox</span> node to give this agent access to tools.
               <br /><br />
@@ -419,10 +435,10 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
         )}
 
         {/* Text/Voice Input/Output - minimal config */}
-        {(selectedNode.type === 'text_input' || selectedNode.type === 'voice_input' || selectedNode.type === 'text_output') && (
+        {(selectedNode.type === 'text_input_event' || selectedNode.type === 'voice_input_event' || selectedNode.type === 'text_output') && (
           <div className="text-xs text-[#555]">
-            {selectedNode.type === 'text_input' && 'Routes typed text from the chat input field.'}
-            {selectedNode.type === 'voice_input' && 'Routes voice-transcribed text from speech input.'}
+            {selectedNode.type === 'text_input_event' && 'Routes typed text from the chat input field.'}
+            {selectedNode.type === 'voice_input_event' && 'Routes voice-transcribed text from speech input.'}
             {selectedNode.type === 'text_output' && 'Displays agent responses in the chat.'}
           </div>
         )}
@@ -561,18 +577,18 @@ export default function NodeInspectorTab({ selectedNode, isDeployed }) {
           </>
         )}
 
-        {/* Wait and Combine config */}
-        {selectedNode.type === 'wait_and_combine' && (
+        {/* Message Buffer config */}
+        {selectedNode.type === 'message_buffer' && (
           <>
             <div className="text-xs text-[#555] p-3 bg-[#1a1a1a] rounded border border-[#2b2b2b]">
               <p className="mb-2">
-                <strong className="text-[#ec4899]">Rendezvous Point</strong>
+                <strong className="text-[#ec4899]">Message Buffer</strong>
               </p>
               <p className="mb-2">
-                This node waits for messages from <strong>all</strong> connected senders before forwarding them as a combined batch.
+                This node collects messages on the <span className="text-[#ec4899]">message_in</span> port until the <span className="text-[#ec4899]">trigger</span> port receives a signal.
               </p>
               <p>
-                Connect multiple <span className="text-[#3b82f6]">message_out</span> ports to this node's <span className="text-[#ec4899]">message_in</span>, then connect <span className="text-[#ec4899]">message_out</span> to an <span className="text-[#3b82f6]">Agent</span> to receive the combined messages.
+                Connect message sources to <span className="text-[#ec4899]">message_in</span>, connect a trigger source (event or agent) to <span className="text-[#ec4899]">trigger</span>, then connect <span className="text-[#ec4899]">message_out</span> to forward buffered messages.
               </p>
             </div>
           </>

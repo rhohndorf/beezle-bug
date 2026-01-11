@@ -13,7 +13,7 @@ const NODE_TYPES = {
     color: '#3b82f6', 
     icon: Bot,
     category: 'Agents',
-    defaultConfig: { name: 'New Agent', model: 'gpt-4', api_url: 'http://127.0.0.1:1234/v1', api_key: '', system_template: 'agent' }
+    defaultConfig: { name: 'New Agent', model: 'gpt-4', api_url: 'http://127.0.0.1:1234/v1', api_key: '', system_template: 'agent', context_size: 25 }
   },
   knowledge_graph: { 
     label: 'Knowledge Graph', 
@@ -36,14 +36,14 @@ const NODE_TYPES = {
     category: 'Resources',
     defaultConfig: { name: 'Toolbox', tools: [] }
   },
-  text_input: { 
+  text_input_event: { 
     label: 'Text Input', 
     color: '#eab308', 
     icon: MessageCircle,
     category: 'Inputs',
     defaultConfig: { name: 'Text Input' }
   },
-  voice_input: { 
+  voice_input_event: { 
     label: 'Voice Input', 
     color: '#8b5cf6', 
     icon: Mic,
@@ -64,12 +64,12 @@ const NODE_TYPES = {
     category: 'Flow Control',
     defaultConfig: { name: 'Scheduled Event', trigger_type: 'interval', interval_seconds: 30 }
   },
-  wait_and_combine: { 
-    label: 'Wait & Combine', 
+  message_buffer: { 
+    label: 'Message Buffer', 
     color: '#ec4899', 
     icon: GitMerge,
     category: 'Flow Control',
-    defaultConfig: { name: 'Wait and Combine' }
+    defaultConfig: { name: 'Message Buffer' }
   },
 };
 
