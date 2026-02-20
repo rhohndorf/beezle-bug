@@ -15,11 +15,11 @@ class NodeType(str, Enum):
     KNOWLEDGE_GRAPH = "knowledge_graph"
     MEMORY_STREAM = "memory_stream"
     TOOLBOX = "toolbox"
-    TEXT_INPUT = "text_input"
-    VOICE_INPUT = "voice_input"
+    TEXT_INPUT_EVENT = "text_input_event"
+    VOICE_INPUT_EVENT = "voice_input_event"
     TEXT_OUTPUT = "text_output"
     SCHEDULED_EVENT = "scheduled_event"
-    WAIT_AND_COMBINE = "wait_and_combine"
+    MESSAGE_BUFFER = "message_buffer"
 
 
 class EdgeType(str, Enum):
@@ -45,6 +45,7 @@ class AgentNodeConfig(BaseModel):
     api_url: str = "http://127.0.0.1:1234/v1"
     api_key: str = ""
     system_template: str = "agent"
+    context_size: int = 25  # Number of recent messages to load from memory
 
 
 class KnowledgeGraphNodeConfig(BaseModel):
@@ -64,13 +65,13 @@ class ToolboxNodeConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
 
 
-class TextInputNodeConfig(BaseModel):
-    """Configuration for Text Input node (typed text entry point)."""
+class TextInputEventNodeConfig(BaseModel):
+    """Configuration for Text Input Event node (typed text entry point)."""
     name: str = "Text Input"
 
 
-class VoiceInputNodeConfig(BaseModel):
-    """Configuration for Voice Input node (voice-transcribed text entry point)."""
+class VoiceInputEventNodeConfig(BaseModel):
+    """Configuration for Voice Input Event node (voice-transcribed text entry point)."""
     name: str = "Voice Input"
 
 
@@ -88,9 +89,9 @@ class ScheduledEventNodeConfig(BaseModel):
     message_content: str = "Review your current state and pending tasks."
 
 
-class WaitAndCombineNodeConfig(BaseModel):
-    """Configuration for a Wait and Combine node (rendezvous point)."""
-    name: str = "Wait and Combine"
+class MessageBufferNodeConfig(BaseModel):
+    """Configuration for a Message Buffer node (collects messages until triggered)."""
+    name: str = "Message Buffer"
 
 
 # Union type for all node configs
@@ -99,10 +100,10 @@ NodeConfig = Union[
     KnowledgeGraphNodeConfig,
     MemoryStreamNodeConfig,
     ToolboxNodeConfig,
-    TextInputNodeConfig,
-    VoiceInputNodeConfig,
+    TextInputEventNodeConfig,
+    VoiceInputEventNodeConfig,
     TextOutputNodeConfig,
     ScheduledEventNodeConfig,
-    WaitAndCombineNodeConfig,
+    MessageBufferNodeConfig,
 ]
 

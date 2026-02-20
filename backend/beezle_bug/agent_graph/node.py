@@ -41,13 +41,13 @@ class Node(BaseModel):
                 "outputs": [],
                 "bidirectional": ["connection"],
             }
-        elif self.type == NodeType.TEXT_INPUT:
+        elif self.type == NodeType.TEXT_INPUT_EVENT:
             return {
                 "inputs": [],
                 "outputs": ["message_out"],
                 "bidirectional": [],
             }
-        elif self.type == NodeType.VOICE_INPUT:
+        elif self.type == NodeType.VOICE_INPUT_EVENT:
             return {
                 "inputs": [],
                 "outputs": ["message_out"],
@@ -65,9 +65,9 @@ class Node(BaseModel):
                 "outputs": ["message_out"],
                 "bidirectional": [],
             }
-        elif self.type == NodeType.WAIT_AND_COMBINE:
+        elif self.type == NodeType.MESSAGE_BUFFER:
             return {
-                "inputs": ["message_in"],
+                "inputs": ["message_in", "trigger"],
                 "outputs": ["message_out"],
                 "bidirectional": [],
             }

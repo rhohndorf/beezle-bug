@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from jinja2 import Template
 
-from beezle_bug.constants import DEFAULT_MSG_BUFFER_SIZE
 from beezle_bug.llm_adapter import BaseAdapter, ToolCallResult, Message
 from beezle_bug.memory import MemoryStream, KnowledgeGraph, get_schema_for_prompt
 from beezle_bug.tools import ToolBox
@@ -29,7 +28,7 @@ class Agent:
     
     Agents can operate in two modes:
     - **Stateful** (with memory_stream): History is persisted to database, retrieved on each call
-    - **Stateless** (no memory_stream): Only uses messages passed to process_message, no persistence
+    - **Stateless** (no memory_stream): Only uses messages passed to execute, no persistence
     
     All operations are async to support storage-backed memory and knowledge graph.
     
@@ -51,7 +50,8 @@ class Agent:
         system_template: Template,
         event_bus: Optional[EventBus] = None,
         memory_stream: Optional[MemoryStream] = None,
-        knowledge_graph: Optional[KnowledgeGraph] = None
+        knowledge_graph: Optional[KnowledgeGraph] = None,
+        context_size: int = 25
     ) -> None:
         """
         Initialize the agent.
@@ -65,6 +65,7 @@ class Agent:
             event_bus: Optional event bus for emitting introspection events
             memory_stream: Optional memory stream for persistence (stateless if None)
             knowledge_graph: Optional shared knowledge graph (creates new if None)
+            context_size: Number of recent messages to load from memory (default 25)
         """
         self.id = id
         self.name = name
@@ -74,6 +75,7 @@ class Agent:
         self.knowledge_graph = knowledge_graph if knowledge_graph is not None else KnowledgeGraph()
         self.event_bus = event_bus
         self.system_message_template = system_template
+        self.context_size = context_size
         
     def _emit(self, event_type: EventType, data: Dict[str, Any]) -> None:
         """Emit an event if event bus is configured."""
@@ -84,12 +86,13 @@ class Agent:
                 data=data
             ))
 
-    async def process_message(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    async def execute(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """
-        Process incoming messages and generate a response.
+        Execute the agent on incoming messages and generate a response.
         
         This is the main entry point for all agent interactions, whether from
-        users, other agents, event nodes, or WaitAndCombine nodes.
+        users, other agents, event nodes, or WaitAndCombine nodes. Implements
+        the Executable protocol for use in the execution graph.
         
         Behavior depends on memory_stream presence:
         - With memory_stream: Retrieves history from DB, stores messages and responses
@@ -124,7 +127,7 @@ class Agent:
                 )
 
             # Stateful: Query database for recent history
-            recent_observations = await self.memory_stream.retrieve_recent(n=DEFAULT_MSG_BUFFER_SIZE)
+            recent_observations = await self.memory_stream.retrieve_recent(n=self.context_size)
             history = [obs.content for obs in recent_observations]
         else:
             # Stateless: Only use incoming messages

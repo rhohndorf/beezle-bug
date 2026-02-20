@@ -45,11 +45,11 @@ class NodeDB(SQLModel, table=True):
             KnowledgeGraphNodeConfig,
             MemoryStreamNodeConfig,
             ToolboxNodeConfig,
-            TextInputNodeConfig,
-            VoiceInputNodeConfig,
+            TextInputEventNodeConfig,
+            VoiceInputEventNodeConfig,
             TextOutputNodeConfig,
             ScheduledEventNodeConfig,
-            WaitAndCombineNodeConfig,
+            MessageBufferNodeConfig,
         )
         
         # Map type string to config class
@@ -58,11 +58,11 @@ class NodeDB(SQLModel, table=True):
             "knowledge_graph": KnowledgeGraphNodeConfig,
             "memory_stream": MemoryStreamNodeConfig,
             "toolbox": ToolboxNodeConfig,
-            "text_input": TextInputNodeConfig,
-            "voice_input": VoiceInputNodeConfig,
+            "text_input_event": TextInputEventNodeConfig,
+            "voice_input_event": VoiceInputEventNodeConfig,
             "text_output": TextOutputNodeConfig,
             "scheduled_event": ScheduledEventNodeConfig,
-            "wait_and_combine": WaitAndCombineNodeConfig,
+            "message_buffer": MessageBufferNodeConfig,
         }
         
         config_class = config_classes.get(self.type)
