@@ -162,4 +162,5 @@ cython_debug/
 frontend/node_modules/
 frontend/.vite
 data/
-cache/
+cache/*
+!cache/.gitkeep
