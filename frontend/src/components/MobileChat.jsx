@@ -408,8 +408,17 @@ export default function MobileChat() {
     try {
       const constraints = {
         audio: sttSettings?.device_id 
-          ? { deviceId: { exact: sttSettings.device_id } }
-          : true
+          ? { 
+              deviceId: { exact: sttSettings.device_id },
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
+          : { 
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
       };
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
