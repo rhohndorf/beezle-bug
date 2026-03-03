@@ -47,7 +47,6 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - ./cache:/cache
-#    devices:
-#      - /dev/dri:/dev/dri
+
   
 
