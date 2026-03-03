@@ -415,7 +415,7 @@ export default function MobileChat() {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       audioContextRef.current = audioContext;
       
       const source = audioContext.createMediaStreamSource(stream);
@@ -431,6 +431,16 @@ export default function MobileChat() {
       
       processor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
+        const nativeRate = audioContext.sampleRate; // e.g. 44100 or 48000
+        const targetRate = 16000;
+        
+        // Downsample by picking every Nth sample
+        const ratio = nativeRate / targetRate;
+        const outputLength = Math.floor(inputData.length / ratio);
+        const downsampled = new Float32Array(outputLength);
+        for (let i = 0; i < outputLength; i++) {
+          downsampled[i] = inputData[Math.floor(i * ratio)];
+        }
         
         let sum = 0;
         for (let i = 0; i < inputData.length; i++) {
@@ -445,9 +455,9 @@ export default function MobileChat() {
           silenceFrames++;
         }
         
-        const int16Data = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]));
+        const int16Data = new Int16Array(outputLength);
+        for (let i = 0; i < outputLength; i++) {
+          const s = Math.max(-1, Math.min(1, downsampled[i]));
           int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
         const base64 = btoa(String.fromCharCode(...new Uint8Array(int16Data.buffer)));
