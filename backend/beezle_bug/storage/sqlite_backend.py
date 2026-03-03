@@ -14,6 +14,7 @@ import sqlite_vec
 from sqlmodel import SQLModel, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import selectinload
+from fastembed import TextEmbedding
 
 if TYPE_CHECKING:
     from beezle_bug.project import Project
@@ -45,7 +46,7 @@ class SQLiteStorageBackend(StorageBackend):
         self.db_path = db_path
         self._engine = None
         self._session_factory = None
-        # Keep aiosqlite connection for sqlite-vec operations
+        self.embedding_model = TextEmbedding(cache_dir="/cache/fastembed")
         self._conn: Optional[aiosqlite.Connection] = None
     
     # === Lifecycle ===
@@ -640,9 +641,8 @@ class SQLiteStorageBackend(StorageBackend):
         obs_id = cursor.lastrowid
         
         # Insert embedding into vec0 table
-        embedding = observation.embedding
-        if hasattr(embedding, 'tolist'):
-            embedding = embedding.tolist()
+        embedding = list(self.embedding_model.query_embed(content_json))[0]
+
         
         await self._conn.execute("""
             INSERT INTO observation_vectors (observation_id, embedding)
@@ -655,7 +655,7 @@ class SQLiteStorageBackend(StorageBackend):
     async def ms_search(
         self,
         ms_id: int,
-        query_embedding: list[float],
+        text: str,
         k: int,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
@@ -663,16 +663,22 @@ class SQLiteStorageBackend(StorageBackend):
         """Search for similar observations using vector similarity."""
         from beezle_bug.memory.memories import Observation
         from beezle_bug.llm_adapter import Message, ToolCallResult, Response
+
+        query_embedding = list(self.embedding_model.query_embed(text))[0]
         
         query = """
             SELECT o.id, o.content_type, o.content, o.importance, 
-                   o.created_at, o.accessed_at, v.distance
+                o.created_at, o.accessed_at, v.distance
             FROM observations o
-            JOIN observation_vectors v ON o.id = v.observation_id
+            JOIN (
+                SELECT observation_id, distance
+                FROM observation_vectors
+                WHERE embedding MATCH ?
+                AND k = ?
+            ) v ON o.id = v.observation_id
             WHERE o.memory_stream_id = ?
-              AND v.embedding MATCH ?
         """
-        params = [ms_id, sqlite_vec.serialize_float32(query_embedding)]
+        params = [sqlite_vec.serialize_float32(query_embedding), k, ms_id]
         
         if from_date:
             query += " AND o.created_at >= ?"
@@ -682,7 +688,7 @@ class SQLiteStorageBackend(StorageBackend):
             query += " AND o.created_at <= ?"
             params.append(to_date.isoformat())
         
-        query += f" ORDER BY v.distance LIMIT {k}"
+        query += " ORDER BY v.distance"
         
         cursor = await self._conn.execute(query, params)
         rows = await cursor.fetchall()
@@ -706,13 +712,10 @@ class SQLiteStorageBackend(StorageBackend):
                 WHERE observation_id = ?
             """, (row["id"],))
             vec_row = await vec_cursor.fetchone()
-            embedding = sqlite_vec.deserialize_float32(vec_row["embedding"]) if vec_row else []
             
             obs = Observation(
                 created=datetime.fromisoformat(row["created_at"]),
                 accessed=datetime.fromisoformat(row["accessed_at"]),
-                importance=row["importance"],
-                embedding=list(embedding),
                 content=content
             )
             obs._db_id = row["id"]

@@ -119,6 +119,7 @@ class OpenAiAdapter:
             Response: Response object with content and tool calls"""
         response = self.client.chat.completions.create(
             model=self.model,
+            reasoning_effort = "high",
             messages=messages,
             tools=tools_to_openai_schema(tools)
         )

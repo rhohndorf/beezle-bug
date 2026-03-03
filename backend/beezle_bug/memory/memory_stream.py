@@ -7,7 +7,6 @@ uses vector similarity search.
 
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Dict, Any, Optional
-from fastembed import TextEmbedding
 
 from beezle_bug.memory.memories import Observation
 from beezle_bug.llm_adapter import Message, ToolCallResult, Response
@@ -44,8 +43,6 @@ class MemoryStream:
         self._storage = storage
         self._ms_id = ms_id
         self.last_reflection_point = 0
-        # Use persistent cache directory for embedding model
-        self.embedding_model = TextEmbedding(cache_dir="/cache/fastembed")
 
     async def add(self, content: Message | ToolCallResult | Response) -> None:
         """
@@ -56,13 +53,8 @@ class MemoryStream:
         Args:
             content: The message, tool call result, or response to store
         """
-        # Generate embedding
-        content_json = content.model_dump_json() if hasattr(content, 'model_dump_json') else content.json()
-        embedding = list(self.embedding_model.query_embed(content_json))[0]
         
-        observation = Observation(content=content, embedding=embedding)
-        
-        # Persist to database
+        observation = Observation(content=content)
         await self._storage.ms_add_observation(self._ms_id, observation)
 
     async def retrieve(
@@ -86,13 +78,11 @@ class MemoryStream:
         Returns:
             List of observations sorted by creation time
         """
-        # Generate query embedding
-        query_embedding = list(self.embedding_model.query_embed(text))[0]
         
         # Use database vector search
         observations = await self._storage.ms_search(
             self._ms_id,
-            list(query_embedding),
+            text,
             k,
             from_date,
             to_date
