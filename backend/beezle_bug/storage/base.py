@@ -301,7 +301,7 @@ class StorageBackend(ABC):
     async def ms_search(
         self,
         ms_id: int,
-        query_embedding: list[float],
+        text: str,
         k: int,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
