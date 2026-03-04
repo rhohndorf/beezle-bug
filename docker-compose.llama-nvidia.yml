@@ -1,0 +1,52 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    user: "${UID:-1000}:${GID:-1000}"  # Run as current user
+    network_mode: host
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BEEZLE_DATA_DIR=/app/data
+      - HF_HOME=/cache/huggingface
+    volumes:
+      - ./backend/beezle_bug:/app/beezle_bug
+      - ./backend/server.py:/app/server.py
+      - ./data:/app/data          # Bind mount for agent data
+      - ./cache:/cache            # Bind mount to avoid HF permissions issues
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=1234
+      - LLAMA_ARG_HF_REPO=unsloth/Qwen3.5-35B-A3B-GGUF
+      - LLAMA_ARG_HF_FILE=Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf
+      - LLAMA_ARG_MODEL=/cache/gguf/Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf
+      - LLAMA_ARG_GPU_LAYERS=99
+      - LLAMA_ARG_CHAT_TEMPLATE_KWARGS='{"enable_thinking":true}'
+      - HF_HOME=/cache/huggingface
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - ./cache:/cache
+
+  
+

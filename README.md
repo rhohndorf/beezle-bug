@@ -209,9 +209,10 @@ Access the mobile interface at `http://your-server:5173/mobile`
 ### Prerequisites
 
 - Docker & Docker Compose
-- An LLM server (OpenAI-compatible API or local llama.cpp)
 
-### Installation
+### Installation 
+
+#### Only Beezle Bug Server
 
 ```bash
 # Clone the repository
@@ -224,6 +225,33 @@ docker compose up -d
 # Frontend available at http://localhost:5173
 # Backend API at http://localhost:5000
 ```
+
+#### Beezle Bug Server with llama.cpp Server (NVIDIA GPU)
+
+```bash
+# Clone the repository
+git clone https://github.com/rhohndorf/beezle-bug.git
+cd beezle-bug
+
+# Set the model to download from HuggingFace
+export LLAMA_HF_REPO=unsloth/Qwen3.5-35B-A3B-GGUF
+export LLAMA_HF_FILE=Qwen3.5-35B-A3B-UD-Q2_K_XL.gguf
+
+# Start the services (requires nvidia-container-toolkit on the host)
+docker compose -f docker-compose.llama-nvidia.yml up -d
+
+# Frontend available at http://localhost:5173
+# Backend API at http://localhost:5000
+# llama.cpp server at http://localhost:1234
+```
+
+The llama.cpp server uses the Vulkan backend and downloads the specified model to `./cache/gguf/` on first start. The model is cached and reused on subsequent starts.
+
+Point an agent node's API URL to `http://127.0.0.1:1234/v1` to use the local llama.cpp server.
+
+> **AMD GPU:** Use `docker-compose.llama-amd.yml` instead.
+
+---
 
 ### First Agent Graph
 
